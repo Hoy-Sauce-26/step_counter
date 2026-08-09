@@ -1,13 +1,20 @@
 import 'package:flutter/material.dart';
 
+import '../services/pedometer_service.dart';
+import 'calibration_test_dialog.dart';
+
+const _calibrationMin = 0.9;
+const _calibrationMax = 1.1;
+
 /// Shows a dialog to calibrate the step sensor's known over/under-counting.
 /// [currentFactor] and the return value are both fractions (1.0 = 100%,
 /// i.e. no correction). Returns null if cancelled.
 Future<double?> showCalibrationDialog(
   BuildContext context,
   double currentFactor,
+  PedometerService pedometerService,
 ) {
-  var factor = currentFactor;
+  var factor = currentFactor.clamp(_calibrationMin, _calibrationMax);
 
   return showDialog<double>(
     context: context,
@@ -30,10 +37,10 @@ Future<double?> showCalibrationDialog(
                   children: [
                     Expanded(
                       child: Slider(
-                        min: 0.7,
-                        max: 1.3,
-                        divisions: 60,
-                        value: factor.clamp(0.7, 1.3),
+                        min: _calibrationMin,
+                        max: _calibrationMax,
+                        divisions: 40,
+                        value: factor.clamp(_calibrationMin, _calibrationMax),
                         label: '${(factor * 100).round()}%',
                         onChanged: (v) => setState(() => factor = v),
                       ),
@@ -47,6 +54,22 @@ Future<double?> showCalibrationDialog(
                       ),
                     ),
                   ],
+                ),
+                const SizedBox(height: 4),
+                Center(
+                  child: TextButton.icon(
+                    icon: const Icon(Icons.directions_walk),
+                    label: const Text('Run 100-step test'),
+                    onPressed: () async {
+                      final result = await showCalibrationTestDialog(
+                        context,
+                        pedometerService,
+                      );
+                      if (result != null) {
+                        setState(() => factor = result);
+                      }
+                    },
+                  ),
                 ),
               ],
             ),

@@ -27,56 +27,61 @@ final todayStepsProvider = StreamProvider<int>((ref) {
   return service.todayStepsStream;
 });
 
-/// The user's configured daily step target (defaults to 10,000).
-final dailyTargetProvider =
-    StateNotifierProvider<DailyTargetNotifier, int>((ref) {
-  return DailyTargetNotifier(ref.watch(preferencesServiceProvider));
+/// 'walking' / 'stopped' / 'unknown' — a faster-reacting motion signal,
+/// separate from the (batched, slower-to-update) step counter. Used only
+/// to give the UI something to show while the counter is still warming up.
+final walkingStatusProvider = StreamProvider<String>((ref) {
+  final service = ref.watch(pedometerServiceProvider);
+  service.start();
+  return service.walkingStatusStream;
 });
 
-class DailyTargetNotifier extends StateNotifier<int> {
-  final PreferencesService _prefs;
+/// The user's configured daily step target (defaults to 10,000).
+final dailyTargetProvider = NotifierProvider<DailyTargetNotifier, int>(
+  DailyTargetNotifier.new,
+);
 
-  DailyTargetNotifier(this._prefs) : super(PreferencesService.defaultDailyTarget) {
+class DailyTargetNotifier extends Notifier<int> {
+  @override
+  int build() {
     _load();
+    return PreferencesService.defaultDailyTarget;
   }
 
   Future<void> _load() async {
-    state = await _prefs.getDailyTarget();
+    state = await ref.read(preferencesServiceProvider).getDailyTarget();
   }
 
   Future<void> setTarget(int target) async {
     state = target;
-    await _prefs.setDailyTarget(target);
+    await ref.read(preferencesServiceProvider).setDailyTarget(target);
   }
 }
 
 /// The user's step-count calibration factor (1.0 = trust the sensor as-is).
 final calibrationFactorProvider =
-    StateNotifierProvider<CalibrationFactorNotifier, double>((ref) {
-  return CalibrationFactorNotifier(
-    ref.watch(preferencesServiceProvider),
-    ref.watch(pedometerServiceProvider),
-  );
-});
+    NotifierProvider<CalibrationFactorNotifier, double>(
+  CalibrationFactorNotifier.new,
+);
 
-class CalibrationFactorNotifier extends StateNotifier<double> {
-  final PreferencesService _prefs;
-  final PedometerService _pedometerService;
-
-  CalibrationFactorNotifier(this._prefs, this._pedometerService)
-      : super(PreferencesService.defaultCorrectionFactor) {
+class CalibrationFactorNotifier extends Notifier<double> {
+  @override
+  double build() {
     _load();
+    return PreferencesService.defaultCorrectionFactor;
   }
 
   Future<void> _load() async {
-    state = await _prefs.getCorrectionFactor();
+    state = await ref.read(preferencesServiceProvider).getCorrectionFactor();
   }
 
   Future<void> setFactor(double factor) async {
     state = factor;
-    await _pedometerService.setCorrectionFactor(factor);
+    await ref.read(pedometerServiceProvider).setCorrectionFactor(factor);
   }
 }
+
+/// Zero-filled list of the past 7 days' records, chronological.
 /// Re-fetches whenever today's live step count changes.
 final past7DaysProvider =
     FutureProvider.autoDispose<List<DailySteps>>((ref) async {

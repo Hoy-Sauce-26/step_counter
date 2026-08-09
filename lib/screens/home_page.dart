@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../services/metrics.dart';
 import '../services/providers.dart';
+import '../widgets/calibration_dialog.dart';
 import '../widgets/edit_target_dialog.dart';
 import '../widgets/metric_card.dart';
 import '../widgets/step_progress_ring.dart';
@@ -43,6 +44,7 @@ class _HomePageState extends ConsumerState<HomePage> {
   Widget build(BuildContext context) {
     final target = ref.watch(dailyTargetProvider);
     final stepsAsync = ref.watch(todayStepsProvider);
+    final walkingStatus = ref.watch(walkingStatusProvider).value;
 
     return Scaffold(
       appBar: AppBar(
@@ -54,6 +56,24 @@ class _HomePageState extends ConsumerState<HomePage> {
             onPressed: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const AnalyticsPage()),
             ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.tune),
+            tooltip: 'Calibrate step count',
+            onPressed: () async {
+              final currentFactor = ref.read(calibrationFactorProvider);
+              final pedometerService = ref.read(pedometerServiceProvider);
+              final newFactor = await showCalibrationDialog(
+                context,
+                currentFactor,
+                pedometerService,
+              );
+              if (newFactor != null) {
+                ref
+                    .read(calibrationFactorProvider.notifier)
+                    .setFactor(newFactor);
+              }
+            },
           ),
           IconButton(
             icon: const Icon(Icons.flag_outlined),
@@ -73,7 +93,11 @@ class _HomePageState extends ConsumerState<HomePage> {
             : !_permissionGranted
                 ? _PermissionDenied(onRetry: _ensurePermission)
                 : stepsAsync.when(
-                    data: (steps) => _StepContent(steps: steps, target: target),
+                    data: (steps) => _StepContent(
+                      steps: steps,
+                      target: target,
+                      walkingStatus: walkingStatus,
+                    ),
                     loading: () =>
                         const Center(child: CircularProgressIndicator()),
                     error: (err, st) => Center(
@@ -88,8 +112,13 @@ class _HomePageState extends ConsumerState<HomePage> {
 class _StepContent extends StatelessWidget {
   final int steps;
   final int target;
+  final String? walkingStatus;
 
-  const _StepContent({required this.steps, required this.target});
+  const _StepContent({
+    required this.steps,
+    required this.target,
+    this.walkingStatus,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -106,13 +135,36 @@ class _StepContent extends StatelessWidget {
       );
     }
 
+    final theme = Theme.of(context);
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
       child: Column(
         children: [
           const SizedBox(height: 8),
           StepProgressRing(currentSteps: steps, dailyTarget: target),
-          const SizedBox(height: 32),
+          if (steps == 0) ...[
+            const SizedBox(height: 16),
+            if (walkingStatus == 'walking')
+              Chip(
+                avatar: Icon(Icons.directions_walk,
+                    size: 18, color: theme.colorScheme.primary),
+                label: const Text('Motion detected'),
+              ),
+            const SizedBox(height: 8),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Text(
+                "If you just installed the app, your phone's step sensor "
+                'can take a minute or two to start reporting after its '
+                'first registration — this is normal.',
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+              ),
+            ),
+          ],
+          const SizedBox(height: 24),
           Row(
             children: [
               MetricCard(

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:pedometer/pedometer.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -26,17 +27,28 @@ import 'preferences_service.dart';
 /// calibration multiplier applied on top of its raw output.
 class PedometerService {
   StreamSubscription<StepCount>? _subscription;
+  StreamSubscription<PedestrianStatus>? _statusSubscription;
   final _controller = StreamController<int>.broadcast();
+  final _statusController = StreamController<String>.broadcast();
   final _dbHelper = DatabaseHelper.instance;
   final _prefsService = PreferencesService();
 
   String? _trackedDate;
   int? _baseline;
   double _correctionFactor = PreferencesService.defaultCorrectionFactor;
+  bool _starting = false;
 
   /// Emits the current day's step count every time a new sensor reading
   /// arrives.
   Stream<int> get todayStepsStream => _controller.stream;
+
+  /// Emits 'walking', 'stopped', or 'unknown' from the separate, lower-
+  /// latency TYPE_STEP_DETECTOR-backed sensor. Purely informational — it
+  /// exists so the UI can show "motion detected" feedback while the
+  /// batched step *counter* is still warming up (which, especially right
+  /// after a fresh install, can take a minute or more before its first
+  /// event — see PedometerService doc comment above).
+  Stream<String> get walkingStatusStream => _statusController.stream;
 
   /// Requests the ACTIVITY_RECOGNITION (Android) / Motion & Fitness (iOS)
   /// permission. Returns true if granted.
@@ -50,9 +62,13 @@ class PedometerService {
   }
 
   /// Begins listening to the hardware pedometer. Safe to call multiple
-  /// times; subsequent calls are ignored while already listening.
+  /// times, including concurrently (e.g. two providers both calling this
+  /// on app start) — the `_starting` flag is set synchronously, before any
+  /// `await`, so a second call can't slip past the guard while the first
+  /// call is still mid-registration.
   Future<void> start() async {
-    if (_subscription != null) return;
+    if (_subscription != null || _starting) return;
+    _starting = true;
 
     _correctionFactor = await _prefsService.getCorrectionFactor();
 
@@ -66,15 +82,32 @@ class PedometerService {
     final existing = await _dbHelper.getStepsForDate(today);
     _controller.add(existing?.stepCount ?? 0);
 
+    final registeredAt = DateTime.now();
+    debugPrint('[PedometerService] registering stepCountStream listener '
+        'at $registeredAt');
+
     _subscription = Pedometer.stepCountStream.listen(
       _onStepCount,
       onError: (Object error) {
+        debugPrint('[PedometerService] stepCountStream error: $error');
         // Sensor unavailable or stream error — surface as -1 so the UI
         // can show a "not available" state rather than crashing.
         _controller.add(-1);
       },
       cancelOnError: false,
     );
+
+    _statusSubscription = Pedometer.pedestrianStatusStream.listen(
+      (status) {
+        debugPrint('[PedometerService] pedestrian status: ${status.status} '
+            'at ${DateTime.now()}');
+        _statusController.add(status.status);
+      },
+      onError: (Object error) => _statusController.add('unknown'),
+      cancelOnError: false,
+    );
+
+    _starting = false;
   }
 
   /// Updates the calibration factor used for future readings (e.g. after
@@ -96,14 +129,37 @@ class PedometerService {
   void stop() {
     _subscription?.cancel();
     _subscription = null;
+    _statusSubscription?.cancel();
+    _statusSubscription = null;
   }
 
   void dispose() {
     stop();
     _controller.close();
+    _statusController.close();
+  }
+
+  /// Starts a short, standalone listening session for the calibration-test
+  /// UI: reports the raw (uncorrected) step delta since the test began via
+  /// [onUpdate]. This is completely independent of the day's baseline /
+  /// today-steps tracking — it's just "how many raw sensor events have
+  /// fired since I started this test" — so it isn't affected by whatever
+  /// correction factor is currently set. Returns the subscription so the
+  /// caller can cancel it when the test ends or is dismissed.
+  StreamSubscription<StepCount> startCalibrationTest(
+    void Function(int rawSteps) onUpdate,
+  ) {
+    int? testBaseline;
+    return Pedometer.stepCountStream.listen((event) {
+      testBaseline ??= event.steps;
+      onUpdate((event.steps - testBaseline!).clamp(0, 1 << 30));
+    });
   }
 
   Future<void> _onStepCount(StepCount event) async {
+    debugPrint('[PedometerService] raw event: steps=${event.steps} '
+        'at ${DateTime.now()} (sensor timestamp: ${event.timeStamp})');
+
     final today = _todayString();
 
     if (_trackedDate != today) {
