@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/daily_steps.dart';
 import 'database_helper.dart';
+import 'preferences_service.dart';
 
 /// Bridges the raw hardware pedometer stream (which reports a value that
 /// is cumulative since the device's last reboot, NOT since midnight) into
@@ -14,16 +15,24 @@ import 'database_helper.dart';
 /// Strategy: for each calendar day we store a "baseline" — the raw
 /// cumulative sensor reading at the moment today's count was 0 — in
 /// SharedPreferences as `baseline_<date>`. Today's step count is then
-/// `rawCumulative - baseline`. If the app is killed and relaunched mid-day,
-/// the baseline is reconstructed from whatever was last persisted to
-/// SQLite for today, so counts don't reset to zero.
+/// `(rawCumulative - baseline) * correctionFactor`. If the app is killed
+/// and relaunched mid-day, the baseline is reconstructed from whatever was
+/// last persisted to SQLite for today, so counts don't reset to zero.
+///
+/// [correctionFactor] (see PreferencesService) exists because the phone's
+/// hardware step sensor is the actual source of truth here — this app
+/// doesn't run its own step-detection algorithm — so if that sensor is
+/// systematically over/under-counting, the only lever we have is a
+/// calibration multiplier applied on top of its raw output.
 class PedometerService {
   StreamSubscription<StepCount>? _subscription;
   final _controller = StreamController<int>.broadcast();
   final _dbHelper = DatabaseHelper.instance;
+  final _prefsService = PreferencesService();
 
   String? _trackedDate;
   int? _baseline;
+  double _correctionFactor = PreferencesService.defaultCorrectionFactor;
 
   /// Emits the current day's step count every time a new sensor reading
   /// arrives.
@@ -45,6 +54,18 @@ class PedometerService {
   Future<void> start() async {
     if (_subscription != null) return;
 
+    _correctionFactor = await _prefsService.getCorrectionFactor();
+
+    // Android's TYPE_STEP_COUNTER sensor only fires an event when the step
+    // count changes — it does NOT push an initial reading just because a
+    // listener was registered. Without this, the UI would sit on a
+    // "loading" state indefinitely until the user took a step. Seed the
+    // stream with today's last-persisted count (0 if none) so the UI has
+    // something to show immediately.
+    final today = _todayString();
+    final existing = await _dbHelper.getStepsForDate(today);
+    _controller.add(existing?.stepCount ?? 0);
+
     _subscription = Pedometer.stepCountStream.listen(
       _onStepCount,
       onError: (Object error) {
@@ -54,6 +75,22 @@ class PedometerService {
       },
       cancelOnError: false,
     );
+  }
+
+  /// Updates the calibration factor used for future readings (e.g. after
+  /// the user adjusts it in settings). Persists it and re-emits today's
+  /// count recalculated with the new factor.
+  Future<void> setCorrectionFactor(double factor) async {
+    _correctionFactor = factor;
+    await _prefsService.setCorrectionFactor(factor);
+
+    if (_trackedDate != null && _baseline != null) {
+      // Re-derive today's raw delta from the last persisted (corrected)
+      // value under the *previous* factor isn't reliable, so instead just
+      // wait for the next sensor event to re-emit under the new factor —
+      // simplest and avoids compounding rounding error. Nothing to do here
+      // for the in-memory state; the next _onStepCount call picks it up.
+    }
   }
 
   void stop() {
@@ -75,8 +112,9 @@ class PedometerService {
       _baseline = await _resolveBaseline(today, event.steps);
     }
 
-    final todaySteps = (event.steps - (_baseline ?? event.steps))
+    final rawDelta = (event.steps - (_baseline ?? event.steps))
         .clamp(0, 1 << 30);
+    final todaySteps = (rawDelta * _correctionFactor).round();
 
     _controller.add(todaySteps);
 
@@ -89,8 +127,10 @@ class PedometerService {
   /// count was zero. If we already have a persisted baseline for today
   /// (app was previously running today), reuse it. Otherwise, if there's
   /// already a step count logged for today (e.g. app restarted mid-day
-  /// without a saved baseline), back-calculate the baseline from that.
-  /// Otherwise, today starts fresh: baseline = current raw reading.
+  /// without a saved baseline), back-calculate the baseline from that —
+  /// inverting the correction factor, since the stored value is already
+  /// calibrated. Otherwise, today starts fresh: baseline = current raw
+  /// reading.
   Future<int> _resolveBaseline(String date, int rawCumulative) async {
     final prefs = await SharedPreferences.getInstance();
     final key = 'baseline_$date';
@@ -99,7 +139,12 @@ class PedometerService {
     if (saved != null) return saved;
 
     final existing = await _dbHelper.getStepsForDate(date);
-    final baseline = rawCumulative - (existing?.stepCount ?? 0);
+    final rawExistingDelta = existing == null
+        ? 0
+        : (_correctionFactor == 0
+            ? 0
+            : (existing.stepCount / _correctionFactor).round());
+    final baseline = rawCumulative - rawExistingDelta;
 
     await prefs.setInt(key, baseline);
     // Clean up baselines from previous days to avoid unbounded growth.

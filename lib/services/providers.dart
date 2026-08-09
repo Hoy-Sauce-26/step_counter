@@ -50,7 +50,33 @@ class DailyTargetNotifier extends StateNotifier<int> {
   }
 }
 
-/// Zero-filled list of the past 7 days' records, chronological.
+/// The user's step-count calibration factor (1.0 = trust the sensor as-is).
+final calibrationFactorProvider =
+    StateNotifierProvider<CalibrationFactorNotifier, double>((ref) {
+  return CalibrationFactorNotifier(
+    ref.watch(preferencesServiceProvider),
+    ref.watch(pedometerServiceProvider),
+  );
+});
+
+class CalibrationFactorNotifier extends StateNotifier<double> {
+  final PreferencesService _prefs;
+  final PedometerService _pedometerService;
+
+  CalibrationFactorNotifier(this._prefs, this._pedometerService)
+      : super(PreferencesService.defaultCorrectionFactor) {
+    _load();
+  }
+
+  Future<void> _load() async {
+    state = await _prefs.getCorrectionFactor();
+  }
+
+  Future<void> setFactor(double factor) async {
+    state = factor;
+    await _pedometerService.setCorrectionFactor(factor);
+  }
+}
 /// Re-fetches whenever today's live step count changes.
 final past7DaysProvider =
     FutureProvider.autoDispose<List<DailySteps>>((ref) async {
