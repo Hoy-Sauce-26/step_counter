@@ -15,21 +15,21 @@
     },
     {
       "name": "characters",
-      "rootUri": "file:///Users/matt/.pub-cache/hosted/pub.dev/characters-1.3.0",
+      "rootUri": "file:///Users/matt/.pub-cache/hosted/pub.dev/characters-1.4.1",
       "packageUri": "lib/",
-      "languageVersion": "2.12"
+      "languageVersion": "3.4"
     },
     {
       "name": "clock",
-      "rootUri": "file:///Users/matt/.pub-cache/hosted/pub.dev/clock-1.1.1",
+      "rootUri": "file:///Users/matt/.pub-cache/hosted/pub.dev/clock-1.1.2",
       "packageUri": "lib/",
-      "languageVersion": "2.12"
+      "languageVersion": "3.4"
     },
     {
       "name": "collection",
-      "rootUri": "file:///Users/matt/.pub-cache/hosted/pub.dev/collection-1.18.0",
+      "rootUri": "file:///Users/matt/.pub-cache/hosted/pub.dev/collection-1.19.1",
       "packageUri": "lib/",
-      "languageVersion": "2.18"
+      "languageVersion": "3.4"
     },
     {
       "name": "cupertino_icons",
@@ -45,9 +45,9 @@
     },
     {
       "name": "fake_async",
-      "rootUri": "file:///Users/matt/.pub-cache/hosted/pub.dev/fake_async-1.3.1",
+      "rootUri": "file:///Users/matt/.pub-cache/hosted/pub.dev/fake_async-1.3.3",
       "packageUri": "lib/",
-      "languageVersion": "2.12"
+      "languageVersion": "3.3"
     },
     {
       "name": "ffi",
@@ -71,7 +71,7 @@
       "name": "flutter",
       "rootUri": "file:///Users/matt/dev/flutter/packages/flutter",
       "packageUri": "lib/",
-      "languageVersion": "3.2"
+      "languageVersion": "3.10"
     },
     {
       "name": "flutter_lints",
@@ -89,13 +89,13 @@
       "name": "flutter_test",
       "rootUri": "file:///Users/matt/dev/flutter/packages/flutter_test",
       "packageUri": "lib/",
-      "languageVersion": "3.2"
+      "languageVersion": "3.10"
     },
     {
       "name": "flutter_web_plugins",
       "rootUri": "file:///Users/matt/dev/flutter/packages/flutter_web_plugins",
       "packageUri": "lib/",
-      "languageVersion": "3.2"
+      "languageVersion": "3.10"
     },
     {
       "name": "intl",
@@ -105,21 +105,21 @@
     },
     {
       "name": "leak_tracker",
-      "rootUri": "file:///Users/matt/.pub-cache/hosted/pub.dev/leak_tracker-10.0.0",
+      "rootUri": "file:///Users/matt/.pub-cache/hosted/pub.dev/leak_tracker-11.0.2",
       "packageUri": "lib/",
-      "languageVersion": "3.1"
+      "languageVersion": "3.2"
     },
     {
       "name": "leak_tracker_flutter_testing",
-      "rootUri": "file:///Users/matt/.pub-cache/hosted/pub.dev/leak_tracker_flutter_testing-2.0.1",
+      "rootUri": "file:///Users/matt/.pub-cache/hosted/pub.dev/leak_tracker_flutter_testing-3.0.10",
       "packageUri": "lib/",
-      "languageVersion": "3.1"
+      "languageVersion": "3.2"
     },
     {
       "name": "leak_tracker_testing",
-      "rootUri": "file:///Users/matt/.pub-cache/hosted/pub.dev/leak_tracker_testing-2.0.1",
+      "rootUri": "file:///Users/matt/.pub-cache/hosted/pub.dev/leak_tracker_testing-3.0.2",
       "packageUri": "lib/",
-      "languageVersion": "3.1"
+      "languageVersion": "3.2"
     },
     {
       "name": "lints",
@@ -129,27 +129,27 @@
     },
     {
       "name": "matcher",
-      "rootUri": "file:///Users/matt/.pub-cache/hosted/pub.dev/matcher-0.12.16+1",
+      "rootUri": "file:///Users/matt/.pub-cache/hosted/pub.dev/matcher-0.12.19",
       "packageUri": "lib/",
-      "languageVersion": "3.0"
+      "languageVersion": "3.7"
     },
     {
       "name": "material_color_utilities",
-      "rootUri": "file:///Users/matt/.pub-cache/hosted/pub.dev/material_color_utilities-0.8.0",
+      "rootUri": "file:///Users/matt/.pub-cache/hosted/pub.dev/material_color_utilities-0.13.0",
       "packageUri": "lib/",
-      "languageVersion": "2.17"
+      "languageVersion": "3.5"
     },
     {
       "name": "meta",
-      "rootUri": "file:///Users/matt/.pub-cache/hosted/pub.dev/meta-1.11.0",
+      "rootUri": "file:///Users/matt/.pub-cache/hosted/pub.dev/meta-1.18.0",
       "packageUri": "lib/",
-      "languageVersion": "2.12"
+      "languageVersion": "3.5"
     },
     {
       "name": "path",
-      "rootUri": "file:///Users/matt/.pub-cache/hosted/pub.dev/path-1.9.0",
+      "rootUri": "file:///Users/matt/.pub-cache/hosted/pub.dev/path-1.9.1",
       "packageUri": "lib/",
-      "languageVersion": "3.0"
+      "languageVersion": "3.4"
     },
     {
       "name": "path_provider_linux",
@@ -275,7 +275,7 @@
       "name": "sky_engine",
       "rootUri": "file:///Users/matt/dev/flutter/bin/cache/pkg/sky_engine",
       "packageUri": "lib/",
-      "languageVersion": "3.2"
+      "languageVersion": "3.10"
     },
     {
       "name": "source_span",
@@ -297,9 +297,9 @@
     },
     {
       "name": "stack_trace",
-      "rootUri": "file:///Users/matt/.pub-cache/hosted/pub.dev/stack_trace-1.11.1",
+      "rootUri": "file:///Users/matt/.pub-cache/hosted/pub.dev/stack_trace-1.12.1",
       "packageUri": "lib/",
-      "languageVersion": "2.18"
+      "languageVersion": "3.4"
     },
     {
       "name": "state_notifier",
@@ -309,9 +309,9 @@
     },
     {
       "name": "stream_channel",
-      "rootUri": "file:///Users/matt/.pub-cache/hosted/pub.dev/stream_channel-2.1.2",
+      "rootUri": "file:///Users/matt/.pub-cache/hosted/pub.dev/stream_channel-2.1.4",
       "packageUri": "lib/",
-      "languageVersion": "2.19"
+      "languageVersion": "3.3"
     },
     {
       "name": "string_scanner",
@@ -333,15 +333,15 @@
     },
     {
       "name": "test_api",
-      "rootUri": "file:///Users/matt/.pub-cache/hosted/pub.dev/test_api-0.6.1",
+      "rootUri": "file:///Users/matt/.pub-cache/hosted/pub.dev/test_api-0.7.11",
       "packageUri": "lib/",
-      "languageVersion": "3.0"
+      "languageVersion": "3.7"
     },
     {
       "name": "vector_math",
-      "rootUri": "file:///Users/matt/.pub-cache/hosted/pub.dev/vector_math-2.1.4",
+      "rootUri": "file:///Users/matt/.pub-cache/hosted/pub.dev/vector_math-2.2.0",
       "packageUri": "lib/",
-      "languageVersion": "2.14"
+      "languageVersion": "3.1"
     },
     {
       "name": "vm_service",
@@ -368,7 +368,9 @@
       "languageVersion": "3.0"
     }
   ],
-  "generated": "2026-08-08T18:05:56.318895Z",
   "generator": "pub",
-  "generatorVersion": "3.3.4"
+  "generatorVersion": "3.12.2",
+  "flutterRoot": "file:///Users/matt/dev/flutter",
+  "flutterVersion": "3.44.9",
+  "pubCache": "file:///Users/matt/.pub-cache"
 }
