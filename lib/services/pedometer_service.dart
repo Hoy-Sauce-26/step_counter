@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/daily_steps.dart';
 import 'database_helper.dart';
+import 'notification_service.dart';
 import 'preferences_service.dart';
 
 /// Bridges the raw hardware pedometer stream (which reports a value that
@@ -200,6 +201,10 @@ class PedometerService {
 
     await _dbHelper.upsertSteps(
       DailySteps(date: today, stepCount: todaySteps),
+    );
+    NotificationService.updateStepNotification(
+      steps: todaySteps,
+      target: await _prefsService.getDailyTarget(),
     );
   }
 
