@@ -1,58 +1,100 @@
+import 'dart:math';
+
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../models/daily_steps.dart';
 
-/// Displays daily step counts for the past 7 days as bars, with a
-/// horizontal dashed line marking the 7-day average.
+/// Bar chart for the past 7 days.
+///
+/// - The y-axis is always labeled, with a floor of [dailyTarget] — it only
+///   extends higher if some day in the week actually beat the target, so
+///   the target is never scrolled off the top of a mostly-under-target
+///   week.
+/// - Each bar is colored by whether that day met the target: theme primary
+///   if it did, gray if it didn't.
+/// - A dashed reference line marks the target itself.
+/// - Tapping a bar shows the exact date and step count.
 class WeeklyBarChart extends StatelessWidget {
   final List<DailySteps> last7Days; // zero-filled, chronological, len 7
-  final double average;
+  final int dailyTarget;
 
   const WeeklyBarChart({
     super.key,
     required this.last7Days,
-    required this.average,
+    required this.dailyTarget,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final maxY = [
-      average,
-      ...last7Days.map((d) => d.stepCount.toDouble()),
-    ].reduce((a, b) => a > b ? a : b) *
-        1.2 +
-        1;
+    final missedColor = theme.brightness == Brightness.dark
+        ? Colors.grey.shade600
+        : Colors.grey.shade400;
+
+    final highestSteps = last7Days.isEmpty
+        ? 0
+        : last7Days.map((d) => d.stepCount).reduce((a, b) => a > b ? a : b);
+    final axisCeiling = max(dailyTarget, highestSteps);
+    final maxY = axisCeiling <= 0 ? 1.0 : axisCeiling * 1.15;
+    final interval = _niceInterval(maxY);
 
     return SizedBox(
-      height: 220,
+      height: 240,
       child: BarChart(
         BarChartData(
           maxY: maxY,
           alignment: BarChartAlignment.spaceAround,
-          gridData: const FlGridData(show: true, drawVerticalLine: false),
-          borderData: FlBorderData(show: false),
+          gridData: FlGridData(
+            show: true,
+            drawVerticalLine: false,
+            horizontalInterval: interval,
+          ),
+          borderData: FlBorderData(
+            show: true,
+            border: Border(
+              bottom: BorderSide(color: theme.colorScheme.outline, width: 1),
+            ),
+          ),
           extraLinesData: ExtraLinesData(horizontalLines: [
             HorizontalLine(
-              y: average,
-              color: theme.colorScheme.secondary,
-              strokeWidth: 2,
-              dashArray: [6, 4],
-              label: HorizontalLineLabel(
-                show: true,
-                labelResolver: (line) => 'avg ${average.round()}',
-                style: TextStyle(
-                  color: theme.colorScheme.secondary,
-                  fontSize: 11,
-                ),
-              ),
+              y: dailyTarget.toDouble(),
+              color: theme.colorScheme.outline,
+              strokeWidth: 1.5,
+              dashArray: const [6, 4],
+              // No inline label here on purpose — wherever it's anchored
+              // (left, right, or centered), some day's bar can end up
+              // right behind it depending on the data. The target value
+              // is shown as text in the section header above instead,
+              // where nothing can ever overlap it.
             ),
           ]),
           titlesData: FlTitlesData(
-            leftTitles: const AxisTitles(
-              sideTitles: SideTitles(showTitles: false),
+            leftTitles: AxisTitles(
+              sideTitles: SideTitles(
+                showTitles: true,
+                reservedSize: 44,
+                interval: interval,
+                getTitlesWidget: (value, meta) {
+                  if (value < 0) return const SizedBox.shrink();
+                  // fl_chart always renders a label at the axis's exact
+                  // computed max in addition to the interval-based ticks,
+                  // which — since that max is usually not a clean multiple
+                  // of `interval` — ends up overlapping the nearest real
+                  // tick label (e.g. a "2.05K" boundary label crowding a
+                  // "2K" gridline label right next to it). Only draw a
+                  // label when the value actually lands on our interval.
+                  final remainder = value % interval;
+                  final onInterval =
+                      remainder < 0.5 || (interval - remainder) < 0.5;
+                  if (!onInterval) return const SizedBox.shrink();
+                  return Text(
+                    NumberFormat.compact().format(value),
+                    style: theme.textTheme.labelSmall,
+                  );
+                },
+              ),
             ),
             rightTitles: const AxisTitles(
               sideTitles: SideTitles(showTitles: false),
@@ -78,13 +120,27 @@ class WeeklyBarChart extends StatelessWidget {
               ),
             ),
           ),
+          barTouchData: BarTouchData(
+            touchTooltipData: BarTouchTooltipData(
+              getTooltipItem: (group, groupIndex, rod, rodIndex) {
+                final day = last7Days[group.x];
+                final dateLabel = DateFormat.MMMd().format(day.dateTime);
+                return BarTooltipItem(
+                  '$dateLabel\n${day.stepCount} steps',
+                  const TextStyle(color: Colors.white, fontSize: 12),
+                );
+              },
+            ),
+          ),
           barGroups: [
             for (var i = 0; i < last7Days.length; i++)
               BarChartGroupData(x: i, barRods: [
                 BarChartRodData(
                   toY: last7Days[i].stepCount.toDouble(),
-                  color: theme.colorScheme.primary,
-                  width: 18,
+                  color: last7Days[i].stepCount >= dailyTarget
+                      ? theme.colorScheme.primary
+                      : missedColor,
+                  width: 20,
                   borderRadius: BorderRadius.circular(4),
                 ),
               ]),
@@ -92,5 +148,16 @@ class WeeklyBarChart extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  /// Picks a "nice" gridline interval (1/2/5 × a power of ten) targeting
+  /// roughly 4 gridlines across the chart.
+  double _niceInterval(double maxY) {
+    if (maxY <= 0) return 1000;
+    final rough = maxY / 4;
+    final magnitude = pow(10, (log(rough) / ln10).floor()).toDouble();
+    final residual = rough / magnitude;
+    final niceResidual = residual >= 5 ? 5.0 : (residual >= 2 ? 2.0 : 1.0);
+    return niceResidual * magnitude;
   }
 }

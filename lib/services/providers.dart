@@ -82,10 +82,17 @@ class CalibrationFactorNotifier extends Notifier<double> {
 }
 
 /// Zero-filled list of the past 7 days' records, chronological.
-/// Re-fetches whenever today's live step count changes.
+/// Only re-fetches on app start and when today's step count crosses a
+/// new multiple of 100 — not on every single step — so the chart doesn't
+/// flicker/redraw constantly while someone is actively walking.
+final _chartRefreshBucketProvider = Provider.autoDispose<int>((ref) {
+  final steps = ref.watch(todayStepsProvider).value ?? 0;
+  return steps ~/ 100;
+});
+
 final past7DaysProvider =
     FutureProvider.autoDispose<List<DailySteps>>((ref) async {
-  ref.watch(todayStepsProvider); // re-fetch on new sensor readings
+  ref.watch(_chartRefreshBucketProvider);
   final db = ref.watch(databaseHelperProvider);
   final records = await db.getPastNDays(7);
 
@@ -100,19 +107,4 @@ final past7DaysProvider =
         '${d.day.toString().padLeft(2, '0')}';
     return DailySteps(date: dateStr, stepCount: byDate[dateStr] ?? 0);
   });
-});
-
-final currentMonthRecordsProvider =
-    FutureProvider.autoDispose<List<DailySteps>>((ref) async {
-  ref.watch(todayStepsProvider);
-  final db = ref.watch(databaseHelperProvider);
-  final now = DateTime.now();
-  return db.getRecordsForMonth(now.year, now.month);
-});
-
-final yearlyMonthlyTotalsProvider =
-    FutureProvider.autoDispose<Map<int, int>>((ref) async {
-  ref.watch(todayStepsProvider);
-  final db = ref.watch(databaseHelperProvider);
-  return db.getMonthlyTotalsForYear(DateTime.now().year);
 });

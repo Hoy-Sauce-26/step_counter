@@ -16,12 +16,12 @@ class StepCounterApp extends StatelessWidget {
       title: 'Step Counter',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF2E7D32)),
+        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFFFFC067)),
         useMaterial3: true,
       ),
       darkTheme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF66BB6A),
+          seedColor: const Color(0xFFFFC067),
           brightness: Brightness.dark,
         ),
         useMaterial3: true,

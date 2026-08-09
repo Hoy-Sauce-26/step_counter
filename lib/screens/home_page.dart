@@ -4,10 +4,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../services/metrics.dart';
 import '../services/providers.dart';
 import '../widgets/calibration_dialog.dart';
+import '../widgets/charts/weekly_bar_chart.dart';
 import '../widgets/edit_target_dialog.dart';
 import '../widgets/metric_card.dart';
 import '../widgets/step_progress_ring.dart';
-import 'analytics_page.dart';
 
 class HomePage extends ConsumerStatefulWidget {
   const HomePage({super.key});
@@ -60,13 +60,6 @@ class _HomePageState extends ConsumerState<HomePage> {
         title: const Text('Step Counter'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.bar_chart),
-            tooltip: 'Analytics',
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const AnalyticsPage()),
-            ),
-          ),
-          IconButton(
             icon: const Icon(Icons.tune),
             tooltip: 'Calibrate step count',
             onPressed: () async {
@@ -118,7 +111,7 @@ class _HomePageState extends ConsumerState<HomePage> {
   }
 }
 
-class _StepContent extends StatelessWidget {
+class _StepContent extends ConsumerWidget {
   final int steps;
   final int target;
   final String? walkingStatus;
@@ -130,7 +123,7 @@ class _StepContent extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     if (steps < 0) {
       return const Center(
         child: Padding(
@@ -145,6 +138,7 @@ class _StepContent extends StatelessWidget {
     }
 
     final theme = Theme.of(context);
+    final past7Days = ref.watch(past7DaysProvider);
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
@@ -196,6 +190,33 @@ class _StepContent extends StatelessWidget {
                 unit: 'min',
               ),
             ],
+          ),
+          const SizedBox(height: 32),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('Past 7 days', style: theme.textTheme.titleMedium),
+              Text(
+                'Target: $target steps',
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          past7Days.when(
+            data: (records) => WeeklyBarChart(
+              last7Days: records,
+              dailyTarget: target,
+            ),
+            loading: () => const SizedBox(
+              height: 240,
+              child: Center(child: CircularProgressIndicator()),
+            ),
+            error: (e, _) => SizedBox(
+              height: 240,
+              child: Center(child: Text('Error loading chart: $e')),
+            ),
           ),
         ],
       ),
