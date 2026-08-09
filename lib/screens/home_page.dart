@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../services/metrics.dart';
+import '../services/notification_service.dart';
 import '../services/providers.dart';
 import '../widgets/calibration_dialog.dart';
 import '../widgets/charts/weekly_bar_chart.dart';
@@ -23,6 +24,11 @@ class _HomePageState extends ConsumerState<HomePage> {
   @override
   void initState() {
     super.initState();
+    // --- FIX #3: Trigger test notification immediately on screen load ---
+    NotificationService.updateStepNotification(
+      steps: 0,
+      target: 0,
+    );
     WidgetsBinding.instance.addPostFrameCallback((_) => _ensurePermission());
   }
 

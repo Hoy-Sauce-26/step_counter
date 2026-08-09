@@ -17,6 +17,23 @@ class NotificationService {
     );
 
     await _notificationsPlugin.initialize(settings: initializationSettings);
+
+    final androidPlugin = _notificationsPlugin.resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
+
+    if (androidPlugin != null) {
+      const AndroidNotificationChannel channel = AndroidNotificationChannel(
+        'step_counter_channel',
+        'Step Counter Updates',
+        description: 'Ongoing daily step counter notification',
+        importance: Importance.low,
+      );
+
+      await androidPlugin.createNotificationChannel(channel);
+
+      // --- FIX #1: Request runtime permission (Android 13+) ---
+      await androidPlugin.requestNotificationsPermission();
+    }
   }
 
   // Request permission (Android 13+ / iOS)
