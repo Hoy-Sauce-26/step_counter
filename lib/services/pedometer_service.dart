@@ -30,6 +30,7 @@ class PedometerService {
   StreamSubscription<PedestrianStatus>? _statusSubscription;
   final _controller = StreamController<int>.broadcast();
   final _statusController = StreamController<String>.broadcast();
+  final _rawCumulativeController = StreamController<int>.broadcast();
   final _dbHelper = DatabaseHelper.instance;
   final _prefsService = PreferencesService();
 
@@ -42,12 +43,10 @@ class PedometerService {
   /// arrives.
   Stream<int> get todayStepsStream => _controller.stream;
 
-  /// Emits 'walking', 'stopped', or 'unknown' from the separate, lower-
-  /// latency TYPE_STEP_DETECTOR-backed sensor. Purely informational — it
-  /// exists so the UI can show "motion detected" feedback while the
-  /// batched step *counter* is still warming up (which, especially right
-  /// after a fresh install, can take a minute or more before its first
-  /// event — see PedometerService doc comment above).
+  /// Emits 'walking', 'stopped', or 'unknown' from the separate
+  /// TYPE_STEP_DETECTOR-backed sensor. Purely informational — gives the UI
+  /// something to show ("motion detected") in the brief window before the
+  /// step counter itself has received its first event.
   Stream<String> get walkingStatusStream => _statusController.stream;
 
   /// Requests the ACTIVITY_RECOGNITION (Android) / Motion & Fitness (iOS)
@@ -66,8 +65,27 @@ class PedometerService {
   /// on app start) — the `_starting` flag is set synchronously, before any
   /// `await`, so a second call can't slip past the guard while the first
   /// call is still mid-registration.
+  ///
+  /// IMPORTANT: this deliberately does nothing if the ACTIVITY_RECOGNITION
+  /// permission isn't granted yet, rather than registering anyway. On a
+  /// fresh install, the permission-request dialog is still async/pending
+  /// the very first time this gets called (providers call start() as soon
+  /// as the home screen builds, before the permission flow resolves) —
+  /// registering the sensor listener before permission exists can leave it
+  /// silently dead with no data ever delivered, even after the permission
+  /// is granted moments later. Because `_subscription` is left null when
+  /// we bail out here, a later call to start() (see HomePage, once
+  /// permission is confirmed granted) will retry properly.
   Future<void> start() async {
     if (_subscription != null || _starting) return;
+
+    final granted = await hasPermission();
+    if (!granted) {
+      debugPrint('[PedometerService] start() called without permission '
+          'granted yet — skipping sensor registration for now.');
+      return;
+    }
+
     _starting = true;
 
     _correctionFactor = await _prefsService.getCorrectionFactor();
@@ -137,28 +155,34 @@ class PedometerService {
     stop();
     _controller.close();
     _statusController.close();
+    _rawCumulativeController.close();
   }
 
-  /// Starts a short, standalone listening session for the calibration-test
-  /// UI: reports the raw (uncorrected) step delta since the test began via
-  /// [onUpdate]. This is completely independent of the day's baseline /
-  /// today-steps tracking — it's just "how many raw sensor events have
-  /// fired since I started this test" — so it isn't affected by whatever
-  /// correction factor is currently set. Returns the subscription so the
-  /// caller can cancel it when the test ends or is dismissed.
-  StreamSubscription<StepCount> startCalibrationTest(
+  /// Starts a calibration-test session by tapping into the raw cumulative
+  /// sensor readings the app is ALREADY receiving via its single active
+  /// listener (see [_onStepCount], which feeds [_rawCumulativeController]).
+  /// This deliberately does NOT create a second listener on
+  /// `Pedometer.stepCountStream` — doing that previously broke the real
+  /// step counter entirely, because Android's EventChannel only supports
+  /// one active native listener per sensor, and cancelling the test's
+  /// listener when the test ended tore down the shared sensor registration
+  /// out from under the app's original listener. Reports the raw
+  /// (uncorrected) step delta since the test began via [onUpdate]. Returns
+  /// the subscription so the caller can cancel it when the test ends.
+  StreamSubscription<int> startCalibrationTest(
     void Function(int rawSteps) onUpdate,
   ) {
     int? testBaseline;
-    return Pedometer.stepCountStream.listen((event) {
-      testBaseline ??= event.steps;
-      onUpdate((event.steps - testBaseline!).clamp(0, 1 << 30));
+    return _rawCumulativeController.stream.listen((rawCumulative) {
+      testBaseline ??= rawCumulative;
+      onUpdate((rawCumulative - testBaseline!).clamp(0, 1 << 30));
     });
   }
 
   Future<void> _onStepCount(StepCount event) async {
     debugPrint('[PedometerService] raw event: steps=${event.steps} '
         'at ${DateTime.now()} (sensor timestamp: ${event.timeStamp})');
+    _rawCumulativeController.add(event.steps);
 
     final today = _todayString();
 

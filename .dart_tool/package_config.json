@@ -285,15 +285,15 @@
     },
     {
       "name": "permission_handler",
-      "rootUri": "file:///Users/matt/.pub-cache/hosted/pub.dev/permission_handler-13.0.0",
+      "rootUri": "file:///Users/matt/.pub-cache/hosted/pub.dev/permission_handler-12.0.3",
       "packageUri": "lib/",
-      "languageVersion": "3.6"
+      "languageVersion": "3.5"
     },
     {
       "name": "permission_handler_android",
-      "rootUri": "file:///Users/matt/.pub-cache/hosted/pub.dev/permission_handler_android-14.0.0",
+      "rootUri": "file:///Users/matt/.pub-cache/hosted/pub.dev/permission_handler_android-13.0.1",
       "packageUri": "lib/",
-      "languageVersion": "3.6"
+      "languageVersion": "3.5"
     },
     {
       "name": "permission_handler_apple",

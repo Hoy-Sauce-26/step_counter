@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:pedometer/pedometer.dart';
 
 import '../services/pedometer_service.dart';
 
@@ -38,7 +37,7 @@ class _CalibrationTestDialog extends StatefulWidget {
 }
 
 class _CalibrationTestDialogState extends State<_CalibrationTestDialog> {
-  StreamSubscription<StepCount>? _subscription;
+  StreamSubscription<int>? _subscription;
   int _rawSteps = 0;
   bool _started = false;
 

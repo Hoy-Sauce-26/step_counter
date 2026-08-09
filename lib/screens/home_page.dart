@@ -38,6 +38,15 @@ class _HomePageState extends ConsumerState<HomePage> {
         _permissionGranted = granted;
       });
     }
+    if (granted) {
+      // The providers' very first call to service.start() happens as soon
+      // as this screen builds — on a fresh install, that's typically
+      // before this permission flow has resolved, so start() will have
+      // bailed out without registering the sensor listeners. Now that
+      // permission is confirmed, retry; start() is a no-op if it already
+      // succeeded.
+      await service.start();
+    }
   }
 
   @override
@@ -155,9 +164,8 @@ class _StepContent extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Text(
-                "If you just installed the app, your phone's step sensor "
-                'can take a minute or two to start reporting after its '
-                'first registration — this is normal.',
+                'Waiting for your first step to be detected — take a few '
+                'steps with your phone on you.',
                 textAlign: TextAlign.center,
                 style: theme.textTheme.bodySmall
                     ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
