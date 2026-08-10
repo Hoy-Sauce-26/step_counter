@@ -58,6 +58,7 @@ class _HomePageState extends ConsumerState<HomePage> {
   @override
   Widget build(BuildContext context) {
     final target = ref.watch(dailyTargetProvider);
+    final calibrationFactor = ref.watch(calibrationFactorProvider);
     final stepsAsync = ref.watch(todayStepsProvider);
     final walkingStatus = ref.watch(walkingStatusProvider).value;
 
@@ -69,11 +70,10 @@ class _HomePageState extends ConsumerState<HomePage> {
             icon: const Icon(Icons.tune),
             tooltip: 'Calibrate step count',
             onPressed: () async {
-              final currentFactor = ref.read(calibrationFactorProvider);
               final pedometerService = ref.read(pedometerServiceProvider);
               final newFactor = await showCalibrationDialog(
                 context,
-                currentFactor,
+                calibrationFactor,
                 pedometerService,
               );
               if (newFactor != null) {

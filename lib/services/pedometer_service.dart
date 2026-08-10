@@ -20,12 +20,6 @@ import 'preferences_service.dart';
 /// `(rawCumulative - baseline) * correctionFactor`. If the app is killed
 /// and relaunched mid-day, the baseline is reconstructed from whatever was
 /// last persisted to SQLite for today, so counts don't reset to zero.
-///
-/// [correctionFactor] (see PreferencesService) exists because the phone's
-/// hardware step sensor is the actual source of truth here — this app
-/// doesn't run its own step-detection algorithm — so if that sensor is
-/// systematically over/under-counting, the only lever we have is a
-/// calibration multiplier applied on top of its raw output.
 class PedometerService {
   StreamSubscription<StepCount>? _subscription;
   StreamSubscription<PedestrianStatus>? _statusSubscription;

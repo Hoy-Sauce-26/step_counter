@@ -59,7 +59,7 @@ Future<double?> showCalibrationDialog(
                 Center(
                   child: TextButton.icon(
                     icon: const Icon(Icons.directions_walk),
-                    label: const Text('Run 100-step test'),
+                    label: const Text('Begin 100-step test'),
                     onPressed: () async {
                       final result = await showCalibrationTestDialog(
                         context,
