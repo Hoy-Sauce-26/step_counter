@@ -63,7 +63,7 @@ class _HomePageState extends ConsumerState<HomePage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Step Counter'),
+        title: const Text('Roamfree'),
         actions: [
           IconButton(
             icon: const Icon(Icons.tune),

@@ -1,4 +1,4 @@
-package com.example.step_counter
+package com.nttech.roamfree
 
 import io.flutter.embedding.android.FlutterActivity
 
