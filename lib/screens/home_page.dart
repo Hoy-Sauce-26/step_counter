@@ -24,7 +24,7 @@ class _HomePageState extends ConsumerState<HomePage> {
   @override
   void initState() {
     super.initState();
-    // --- FIX #3: Trigger test notification immediately on screen load ---
+    // Trigger test notification immediately on screen load
     NotificationService.updateStepNotification(
       steps: 0,
       target: 0,

@@ -31,7 +31,6 @@ class NotificationService {
 
       await androidPlugin.createNotificationChannel(channel);
 
-      // --- FIX #1: Request runtime permission (Android 13+) ---
       await androidPlugin.requestNotificationsPermission();
     }
   }
