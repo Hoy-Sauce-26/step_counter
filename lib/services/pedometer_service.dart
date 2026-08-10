@@ -208,6 +208,18 @@ class PedometerService {
     );
   }
 
+  /// Refreshes the notification immediately with the given target (paired
+  /// with the most recently persisted step count), without waiting for the
+  /// next sensor event. Call this whenever the user changes their daily
+  /// target, since _onStepCount only fires on new steps and won't pick up
+  /// a target change on its own.
+  Future<void> refreshNotificationWithTarget(int target, int currSteps) async {
+    await NotificationService.updateStepNotification(
+      steps: currSteps,
+      target: target,
+    );
+  }
+
   /// Figures out what the sensor's cumulative reading was when today's
   /// count was zero. If we already have a persisted baseline for today
   /// (app was previously running today), reuse it. Otherwise, if there's
