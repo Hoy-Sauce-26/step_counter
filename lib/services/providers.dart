@@ -55,6 +55,11 @@ class DailyTargetNotifier extends Notifier<int> {
   Future<void> setTarget(int target) async {
     state = target;
     await ref.read(preferencesServiceProvider).setDailyTarget(target);
+
+    final currentSteps = ref.read(todayStepsProvider).value ?? 0;
+    await ref
+        .read(pedometerServiceProvider)
+        .refreshNotificationWithTarget(target, currentSteps);
   }
 }
 
