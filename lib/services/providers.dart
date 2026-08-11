@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/daily_steps.dart';
+import '../models/hourly_steps.dart';
 import 'database_helper.dart';
 import 'pedometer_service.dart';
 import 'preferences_service.dart';
@@ -55,11 +56,6 @@ class DailyTargetNotifier extends Notifier<int> {
   Future<void> setTarget(int target) async {
     state = target;
     await ref.read(preferencesServiceProvider).setDailyTarget(target);
-
-    final currentSteps = ref.read(todayStepsProvider).value ?? 0;
-    await ref
-        .read(pedometerServiceProvider)
-        .refreshNotificationWithTarget(target, currentSteps);
   }
 }
 
@@ -113,3 +109,33 @@ final past7DaysProvider =
     return DailySteps(date: dateStr, stepCount: byDate[dateStr] ?? 0);
   });
 });
+
+/// Zero-filled 24-hour breakdown for a specific date (ISO-8601 string,
+/// e.g. "2026-08-11"). Refreshes on the same throttled cadence as
+/// [past7DaysProvider] when the requested date is today; historical dates
+/// are static once fetched.
+final hourlyStepsForDateProvider =
+    FutureProvider.autoDispose.family<List<HourlySteps>, String>(
+  (ref, date) async {
+    final today = DateTime.now();
+    final todayStr = '${today.year.toString().padLeft(4, '0')}-'
+        '${today.month.toString().padLeft(2, '0')}-'
+        '${today.day.toString().padLeft(2, '0')}';
+    if (date == todayStr) {
+      ref.watch(_chartRefreshBucketProvider);
+    }
+
+    final db = ref.watch(databaseHelperProvider);
+    final records = await db.getHourlyStepsForDate(date);
+    final byHour = {for (final r in records) r.hour: r.stepCount};
+
+    return List.generate(
+      24,
+      (hour) => HourlySteps(
+        date: date,
+        hour: hour,
+        stepCount: byHour[hour] ?? 0,
+      ),
+    );
+  },
+);

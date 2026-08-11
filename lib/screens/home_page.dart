@@ -7,6 +7,7 @@ import '../services/providers.dart';
 import '../widgets/calibration_dialog.dart';
 import '../widgets/charts/weekly_bar_chart.dart';
 import '../widgets/edit_target_dialog.dart';
+import '../widgets/hourly_breakdown_dialog.dart';
 import '../widgets/metric_card.dart';
 import '../widgets/step_progress_ring.dart';
 
@@ -246,6 +247,8 @@ class _StepContent extends ConsumerWidget {
             data: (records) => WeeklyBarChart(
               last7Days: records,
               dailyTarget: target,
+              onDaySelected: (date) =>
+                  showHourlyBreakdownDialog(context, date),
             ),
             loading: () => const SizedBox(
               height: 240,
