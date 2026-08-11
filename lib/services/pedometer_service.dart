@@ -1,51 +1,30 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:pedometer/pedometer.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
-import '../models/daily_steps.dart';
 import 'database_helper.dart';
 import 'notification_service.dart';
 import 'preferences_service.dart';
 
-/// Bridges the raw hardware pedometer stream (which reports a value that
-/// is cumulative since the device's last reboot, NOT since midnight) into
-/// a "steps taken today" stream, and persists that value to SQLite.
-///
-/// Strategy: for each calendar day we store a "baseline" — the raw
-/// cumulative sensor reading at the moment today's count was 0 — in
-/// SharedPreferences as `baseline_<date>`. Today's step count is then
-/// `(rawCumulative - baseline) * correctionFactor`. If the app is killed
-/// and relaunched mid-day, the baseline is reconstructed from whatever was
-/// last persisted to SQLite for today, so counts don't reset to zero.
 class PedometerService {
-  StreamSubscription<StepCount>? _subscription;
   StreamSubscription<PedestrianStatus>? _statusSubscription;
+  StreamSubscription<dynamic>? _bgStepSubscription;
+  StreamSubscription<dynamic>? _bgRawSubscription;
   final _controller = StreamController<int>.broadcast();
   final _statusController = StreamController<String>.broadcast();
   final _rawCumulativeController = StreamController<int>.broadcast();
   final _dbHelper = DatabaseHelper.instance;
   final _prefsService = PreferencesService();
 
-  String? _trackedDate;
-  int? _baseline;
-  double _correctionFactor = PreferencesService.defaultCorrectionFactor;
   bool _starting = false;
 
-  /// Emits the current day's step count every time a new sensor reading
-  /// arrives.
   Stream<int> get todayStepsStream => _controller.stream;
 
-  /// Emits 'walking', 'stopped', or 'unknown' from the separate
-  /// TYPE_STEP_DETECTOR-backed sensor. Purely informational — gives the UI
-  /// something to show ("motion detected") in the brief window before the
-  /// step counter itself has received its first event.
   Stream<String> get walkingStatusStream => _statusController.stream;
 
-  /// Requests the ACTIVITY_RECOGNITION (Android) / Motion & Fitness (iOS)
-  /// permission. Returns true if granted.
   Future<bool> requestPermission() async {
     final status = await Permission.activityRecognition.request();
     return status.isGranted;
@@ -55,60 +34,37 @@ class PedometerService {
     return Permission.activityRecognition.isGranted;
   }
 
-  /// Begins listening to the hardware pedometer. Safe to call multiple
-  /// times, including concurrently (e.g. two providers both calling this
-  /// on app start) — the `_starting` flag is set synchronously, before any
-  /// `await`, so a second call can't slip past the guard while the first
-  /// call is still mid-registration.
-  ///
-  /// IMPORTANT: this deliberately does nothing if the ACTIVITY_RECOGNITION
-  /// permission isn't granted yet, rather than registering anyway. On a
-  /// fresh install, the permission-request dialog is still async/pending
-  /// the very first time this gets called (providers call start() as soon
-  /// as the home screen builds, before the permission flow resolves) —
-  /// registering the sensor listener before permission exists can leave it
-  /// silently dead with no data ever delivered, even after the permission
-  /// is granted moments later. Because `_subscription` is left null when
-  /// we bail out here, a later call to start() (see HomePage, once
-  /// permission is confirmed granted) will retry properly.
   Future<void> start() async {
-    if (_subscription != null || _starting) return;
+    if (_bgStepSubscription != null || _starting) return;
 
     final granted = await hasPermission();
     if (!granted) {
       debugPrint('[PedometerService] start() called without permission '
-          'granted yet — skipping sensor registration for now.');
+          'granted yet — skipping for now.');
       return;
     }
 
     _starting = true;
 
-    _correctionFactor = await _prefsService.getCorrectionFactor();
-
-    // Android's TYPE_STEP_COUNTER sensor only fires an event when the step
-    // count changes — it does NOT push an initial reading just because a
-    // listener was registered. Without this, the UI would sit on a
-    // "loading" state indefinitely until the user took a step. Seed the
-    // stream with today's last-persisted count (0 if none) so the UI has
-    // something to show immediately.
     final today = _todayString();
     final existing = await _dbHelper.getStepsForDate(today);
     _controller.add(existing?.stepCount ?? 0);
 
-    final registeredAt = DateTime.now();
-    debugPrint('[PedometerService] registering stepCountStream listener '
-        'at $registeredAt');
+    final service = FlutterBackgroundService();
 
-    _subscription = Pedometer.stepCountStream.listen(
-      _onStepCount,
-      onError: (Object error) {
-        debugPrint('[PedometerService] stepCountStream error: $error');
-        // Sensor unavailable or stream error — surface as -1 so the UI
-        // can show a "not available" state rather than crashing.
-        _controller.add(-1);
-      },
-      cancelOnError: false,
-    );
+    _bgStepSubscription = service.on('stepUpdate').listen((event) {
+      if (event == null) return;
+      final steps = event['steps'] as int? ?? 0;
+      debugPrint('[PedometerService] stepUpdate from background service: '
+          '$steps at ${DateTime.now()}');
+      _controller.add(steps);
+    });
+
+    _bgRawSubscription = service.on('rawStep').listen((event) {
+      if (event == null) return;
+      final raw = event['raw'] as int? ?? 0;
+      _rawCumulativeController.add(raw);
+    });
 
     _statusSubscription = Pedometer.pedestrianStatusStream.listen(
       (status) {
@@ -123,25 +79,31 @@ class PedometerService {
     _starting = false;
   }
 
-  /// Updates the calibration factor used for future readings (e.g. after
-  /// the user adjusts it in settings). Persists it and re-emits today's
-  /// count recalculated with the new factor.
-  Future<void> setCorrectionFactor(double factor) async {
-    _correctionFactor = factor;
-    await _prefsService.setCorrectionFactor(factor);
+  Future<void> refreshForCurrentDate() async {
+    final today = _todayString();
+    final existing = await _dbHelper.getStepsForDate(today);
+    _controller.add(existing?.stepCount ?? 0);
+  }
 
-    if (_trackedDate != null && _baseline != null) {
-      // Re-derive today's raw delta from the last persisted (corrected)
-      // value under the *previous* factor isn't reliable, so instead just
-      // wait for the next sensor event to re-emit under the new factor —
-      // simplest and avoids compounding rounding error. Nothing to do here
-      // for the in-memory state; the next _onStepCount call picks it up.
-    }
+  Future<void> setCorrectionFactor(double factor) async {
+    await _prefsService.setCorrectionFactor(factor);
+  }
+
+  Future<void> refreshNotificationWithTarget(
+    int target,
+    int currSteps,
+  ) async {
+    await NotificationService.updateStepNotification(
+      steps: currSteps,
+      target: target,
+    );
   }
 
   void stop() {
-    _subscription?.cancel();
-    _subscription = null;
+    _bgStepSubscription?.cancel();
+    _bgStepSubscription = null;
+    _bgRawSubscription?.cancel();
+    _bgRawSubscription = null;
     _statusSubscription?.cancel();
     _statusSubscription = null;
   }
@@ -153,17 +115,6 @@ class PedometerService {
     _rawCumulativeController.close();
   }
 
-  /// Starts a calibration-test session by tapping into the raw cumulative
-  /// sensor readings the app is ALREADY receiving via its single active
-  /// listener (see [_onStepCount], which feeds [_rawCumulativeController]).
-  /// This deliberately does NOT create a second listener on
-  /// `Pedometer.stepCountStream` — doing that previously broke the real
-  /// step counter entirely, because Android's EventChannel only supports
-  /// one active native listener per sensor, and cancelling the test's
-  /// listener when the test ended tore down the shared sensor registration
-  /// out from under the app's original listener. Reports the raw
-  /// (uncorrected) step delta since the test began via [onUpdate]. Returns
-  /// the subscription so the caller can cancel it when the test ends.
   StreamSubscription<int> startCalibrationTest(
     void Function(int rawSteps) onUpdate,
   ) {
@@ -172,88 +123,6 @@ class PedometerService {
       testBaseline ??= rawCumulative;
       onUpdate((rawCumulative - testBaseline!).clamp(0, 1 << 30));
     });
-  }
-
-  Future<void> _onStepCount(StepCount event) async {
-    debugPrint('[PedometerService] raw event: steps=${event.steps} '
-        'at ${DateTime.now()} (sensor timestamp: ${event.timeStamp})');
-    _rawCumulativeController.add(event.steps);
-
-    final today = _todayString();
-
-    if (_trackedDate != today) {
-      // New day (or first event since app start): (re)establish baseline.
-      _trackedDate = today;
-      _baseline = await _resolveBaseline(today, event.steps);
-    }
-
-    final rawDelta = (event.steps - (_baseline ?? event.steps))
-        .clamp(0, 1 << 30);
-    final todaySteps = (rawDelta * _correctionFactor).round();
-
-    _controller.add(todaySteps);
-
-    await _dbHelper.upsertSteps(
-      DailySteps(date: today, stepCount: todaySteps),
-    );
-    NotificationService.updateStepNotification(
-      steps: todaySteps,
-      target: await _prefsService.getDailyTarget(),
-    );
-  }
-
-  /// Refreshes the notification immediately with the given target (paired
-  /// with the most recently persisted step count), without waiting for the
-  /// next sensor event. Call this whenever the user changes their daily
-  /// target, since _onStepCount only fires on new steps and won't pick up
-  /// a target change on its own.
-  Future<void> refreshNotificationWithTarget(int target, int currSteps) async {
-    await NotificationService.updateStepNotification(
-      steps: currSteps,
-      target: target,
-    );
-  }
-
-  /// Figures out what the sensor's cumulative reading was when today's
-  /// count was zero. If we already have a persisted baseline for today
-  /// (app was previously running today), reuse it. Otherwise, if there's
-  /// already a step count logged for today (e.g. app restarted mid-day
-  /// without a saved baseline), back-calculate the baseline from that —
-  /// inverting the correction factor, since the stored value is already
-  /// calibrated. Otherwise, today starts fresh: baseline = current raw
-  /// reading.
-  Future<int> _resolveBaseline(String date, int rawCumulative) async {
-    final prefs = await SharedPreferences.getInstance();
-    final key = 'baseline_$date';
-
-    final saved = prefs.getInt(key);
-    if (saved != null) return saved;
-
-    final existing = await _dbHelper.getStepsForDate(date);
-    final rawExistingDelta = existing == null
-        ? 0
-        : (_correctionFactor == 0
-            ? 0
-            : (existing.stepCount / _correctionFactor).round());
-    final baseline = rawCumulative - rawExistingDelta;
-
-    await prefs.setInt(key, baseline);
-    // Clean up baselines from previous days to avoid unbounded growth.
-    await _pruneOldBaselines(prefs, keep: date);
-
-    return baseline;
-  }
-
-  Future<void> _pruneOldBaselines(
-    SharedPreferences prefs, {
-    required String keep,
-  }) async {
-    final keysToRemove = prefs
-        .getKeys()
-        .where((k) => k.startsWith('baseline_') && k != 'baseline_$keep');
-    for (final k in keysToRemove) {
-      await prefs.remove(k);
-    }
   }
 
   String _todayString() {

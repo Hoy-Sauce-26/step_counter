@@ -58,9 +58,10 @@ class NotificationService {
       channelDescription: 'Ongoing daily step counter notification',
       importance: Importance.low, // Keeps it quiet when updating frequently
       priority: Priority.low,
-      ongoing: true,              // Prevents swipe-to-dismiss
-      autoCancel: false,          // Keeps notification active on click
-      onlyAlertOnce: true,       // Prevents sound/vibration on every step update
+      ongoing: true,
+      autoCancel: false,
+      onlyAlertOnce: true,
+      playSound: false,
       icon: '@mipmap/ic_launcher',
       showProgress: true,
       maxProgress: target,
