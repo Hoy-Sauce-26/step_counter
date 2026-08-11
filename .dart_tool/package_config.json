@@ -146,6 +146,30 @@
       "languageVersion": "3.10"
     },
     {
+      "name": "flutter_background_service",
+      "rootUri": "file:///Users/matt/.pub-cache/hosted/pub.dev/flutter_background_service-5.1.0",
+      "packageUri": "lib/",
+      "languageVersion": "2.17"
+    },
+    {
+      "name": "flutter_background_service_android",
+      "rootUri": "file:///Users/matt/.pub-cache/hosted/pub.dev/flutter_background_service_android-6.3.1",
+      "packageUri": "lib/",
+      "languageVersion": "2.17"
+    },
+    {
+      "name": "flutter_background_service_ios",
+      "rootUri": "file:///Users/matt/.pub-cache/hosted/pub.dev/flutter_background_service_ios-5.0.3",
+      "packageUri": "lib/",
+      "languageVersion": "2.17"
+    },
+    {
+      "name": "flutter_background_service_platform_interface",
+      "rootUri": "file:///Users/matt/.pub-cache/hosted/pub.dev/flutter_background_service_platform_interface-5.1.2",
+      "packageUri": "lib/",
+      "languageVersion": "2.17"
+    },
+    {
       "name": "flutter_launcher_icons",
       "rootUri": "file:///Users/matt/.pub-cache/hosted/pub.dev/flutter_launcher_icons-0.14.4",
       "packageUri": "lib/",

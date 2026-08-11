@@ -10,6 +10,7 @@
         "cupertino_icons",
         "fl_chart",
         "flutter",
+        "flutter_background_service",
         "flutter_local_notifications",
         "flutter_riverpod",
         "intl",
@@ -61,6 +62,16 @@
         "stream_channel",
         "test_api",
         "vector_math"
+      ]
+    },
+    {
+      "name": "flutter_background_service",
+      "version": "5.1.0",
+      "dependencies": [
+        "flutter",
+        "flutter_background_service_android",
+        "flutter_background_service_ios",
+        "flutter_background_service_platform_interface"
       ]
     },
     {
@@ -301,6 +312,23 @@
         "stream_channel",
         "string_scanner",
         "term_glyph"
+      ]
+    },
+    {
+      "name": "flutter_background_service_platform_interface",
+      "version": "5.1.2",
+      "dependencies": [
+        "flutter",
+        "platform",
+        "plugin_platform_interface"
+      ]
+    },
+    {
+      "name": "flutter_background_service_ios",
+      "version": "5.0.3",
+      "dependencies": [
+        "flutter",
+        "flutter_background_service_platform_interface"
       ]
     },
     {
@@ -619,6 +647,18 @@
       ]
     },
     {
+      "name": "plugin_platform_interface",
+      "version": "2.1.8",
+      "dependencies": [
+        "meta"
+      ]
+    },
+    {
+      "name": "platform",
+      "version": "3.1.6",
+      "dependencies": []
+    },
+    {
       "name": "http",
       "version": "1.6.0",
       "dependencies": [
@@ -626,13 +666,6 @@
         "http_parser",
         "meta",
         "web"
-      ]
-    },
-    {
-      "name": "plugin_platform_interface",
-      "version": "2.1.8",
-      "dependencies": [
-        "meta"
       ]
     },
     {
@@ -757,11 +790,6 @@
     {
       "name": "synchronized",
       "version": "3.4.1+1",
-      "dependencies": []
-    },
-    {
-      "name": "platform",
-      "version": "3.1.6",
       "dependencies": []
     },
     {
@@ -1060,6 +1088,14 @@
       "dependencies": [
         "meta",
         "source_span"
+      ]
+    },
+    {
+      "name": "flutter_background_service_android",
+      "version": "6.3.1",
+      "dependencies": [
+        "flutter",
+        "flutter_background_service_platform_interface"
       ]
     }
   ],
