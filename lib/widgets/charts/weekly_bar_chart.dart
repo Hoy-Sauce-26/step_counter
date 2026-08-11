@@ -15,15 +15,18 @@ import '../../models/daily_steps.dart';
 /// - Each bar is colored by whether that day met the target: theme primary
 ///   if it did, gray if it didn't.
 /// - A dashed reference line marks the target itself.
-/// - Tapping a bar shows the exact date and step count.
+/// - Tapping a bar shows the exact date and step count, and calls
+///   [onDaySelected] with that day's date, if provided.
 class WeeklyBarChart extends StatelessWidget {
   final List<DailySteps> last7Days; // zero-filled, chronological, len 7
   final int dailyTarget;
+  final void Function(DateTime date)? onDaySelected;
 
   const WeeklyBarChart({
     super.key,
     required this.last7Days,
     required this.dailyTarget,
+    this.onDaySelected,
   });
 
   @override
@@ -111,7 +114,7 @@ class WeeklyBarChart extends StatelessWidget {
                     return const SizedBox.shrink();
                   }
                   final label =
-                      DateFormat.E().format(last7Days[index].dateTime);
+                  DateFormat.E().format(last7Days[index].dateTime);
                   return Padding(
                     padding: const EdgeInsets.only(top: 6),
                     child: Text(label, style: theme.textTheme.labelSmall),
@@ -131,6 +134,15 @@ class WeeklyBarChart extends StatelessWidget {
                 );
               },
             ),
+            touchCallback: (event, response) {
+              if (onDaySelected == null) return;
+              if (event is! FlTapUpEvent) return;
+              final index = response?.spot?.touchedBarGroupIndex;
+              if (index == null || index < 0 || index >= last7Days.length) {
+                return;
+              }
+              onDaySelected!(last7Days[index].dateTime);
+            },
           ),
           barGroups: [
             for (var i = 0; i < last7Days.length; i++)

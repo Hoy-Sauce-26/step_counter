@@ -26,11 +26,12 @@ Future<void> initializeBackgroundService() async {
       initialNotificationContent: 'Starting…',
       foregroundServiceNotificationId: backgroundNotificationId,
     ),
+    // No iOS equivalent for this feature — see prior discussion.
     iosConfiguration: IosConfiguration(),
   );
 }
 
-/// This is the ONLY place in the app that calls `Pedometer.stepCountStream.listen()`
+/// This is the only place in the app that calls `Pedometer.stepCountStream.listen()`
 @pragma('vm:entry-point')
 void onServiceStart(ServiceInstance service) async {
   DartPluginRegistrant.ensureInitialized();
@@ -55,7 +56,16 @@ void onServiceStart(ServiceInstance service) async {
   int? baseline;
   double correctionFactor = await prefsService.getCorrectionFactor();
 
+  // Hourly-bucket tracking. `hourStartDayTotal` is the day's cumulative
+  // total at the moment the current hour began — an hour's step count is
+  // just (today's running total right now) minus that value, mirroring
+  // exactly how the daily baseline works, one level nested.
+  String? trackedHourKey;
+  int? hourStartDayTotal;
+  int? lastTodaySteps;
+
   Pedometer.stepCountStream.listen((event) async {
+    final now = DateTime.now();
     final today = _todayString();
 
     if (trackedDate != today) {
@@ -67,6 +77,9 @@ void onServiceStart(ServiceInstance service) async {
         event.steps,
         correctionFactor,
       );
+      // New day: yesterday's "day total so far" no longer applies.
+      lastTodaySteps = null;
+      trackedHourKey = null;
     }
 
     final rawDelta =
@@ -74,13 +87,36 @@ void onServiceStart(ServiceInstance service) async {
     final todaySteps = (rawDelta * correctionFactor).round();
     final target = await prefsService.getDailyTarget();
 
+    // Hourly bucketing.
+    final currentHour = now.hour;
+    final hourKey = '$today-$currentHour';
+    if (trackedHourKey != hourKey) {
+      trackedHourKey = hourKey;
+      // If this specific hour already has a persisted count (the service
+      // restarted mid-hour, e.g. after a reboot), reconstruct the
+      // baseline from it so this hour resumes rather than resets or
+      // double-counts. Otherwise, this is a genuinely fresh hour — treat
+      // the day-total as of the previous event as its starting point, so
+      // this very first event's own step(s) show up immediately rather
+      // than waiting for a second event in the same hour.
+      final existingHour =
+          await dbHelper.getHourlyStepsForDateAndHour(today, currentHour);
+      hourStartDayTotal =
+          existingHour != null ? todaySteps - existingHour : lastTodaySteps;
+    }
+    final hourlySteps =
+        (todaySteps - (hourStartDayTotal ?? todaySteps)).clamp(0, 1 << 30);
+
     await dbHelper.upsertSteps(
       DailySteps(date: today, stepCount: todaySteps),
     );
+    await dbHelper.upsertHourlySteps(today, currentHour, hourlySteps);
     await NotificationService.updateStepNotification(
       steps: todaySteps,
       target: target,
     );
+
+    lastTodaySteps = todaySteps;
 
     service.invoke('stepUpdate', {'steps': todaySteps, 'target': target});
     service.invoke('rawStep', {'raw': event.steps});
