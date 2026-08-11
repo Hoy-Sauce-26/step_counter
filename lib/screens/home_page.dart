@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../services/metrics.dart';
-import '../services/notification_service.dart';
 import '../services/providers.dart';
 import '../widgets/calibration_dialog.dart';
 import '../widgets/charts/weekly_bar_chart.dart';
@@ -17,19 +17,50 @@ class HomePage extends ConsumerStatefulWidget {
   ConsumerState<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends ConsumerState<HomePage> {
+class _HomePageState extends ConsumerState<HomePage>
+    with WidgetsBindingObserver {
   bool _permissionChecked = false;
   bool _permissionGranted = false;
 
   @override
   void initState() {
     super.initState();
-    // Trigger test notification immediately on screen load
-    NotificationService.updateStepNotification(
-      steps: 0,
-      target: 0,
-    );
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) => _ensurePermission());
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      // Fixes a real bug: without this, if the calendar date rolled over
+      // while the app was closed and no step has happened yet today, the
+      // UI keeps showing yesterday's stale total until a fresh step event
+      // forces a recheck — confusing on exactly the mornings someone
+      // opens the app first thing. Re-seeding on every resume means the
+      // displayed value is always correct the instant the screen appears.
+      ref.read(pedometerServiceProvider).refreshForCurrentDate();
+
+      // Defensive: if the background service somehow isn't running
+      // (killed by an aggressive OEM battery manager, first run after
+      // this update, etc.), restart it rather than silently going
+      // without tracking until the next full app restart.
+      _ensureBackgroundServiceRunning();
+    }
+  }
+
+  Future<void> _ensureBackgroundServiceRunning() async {
+    if (!_permissionGranted) return;
+    final bgService = FlutterBackgroundService();
+    final isRunning = await bgService.isRunning();
+    if (!isRunning) {
+      await bgService.startService();
+    }
   }
 
   Future<void> _ensurePermission() async {
@@ -52,6 +83,7 @@ class _HomePageState extends ConsumerState<HomePage> {
       // permission is confirmed, retry; start() is a no-op if it already
       // succeeded.
       await service.start();
+      await _ensureBackgroundServiceRunning();
     }
   }
 

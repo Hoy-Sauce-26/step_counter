@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:step_counter/services/background_service.dart';
 import 'package:step_counter/services/notification_service.dart';
 
 import 'screens/home_page.dart';
@@ -8,6 +9,8 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   await NotificationService.init();
+  await NotificationService.requestPermissions();
+  await initializeBackgroundService();
 
   runApp(const ProviderScope(child: StepCounterApp()));
 }
