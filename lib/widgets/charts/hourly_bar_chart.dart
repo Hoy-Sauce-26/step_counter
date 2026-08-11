@@ -2,6 +2,7 @@ import 'dart:math';
 
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 
 import '../../models/hourly_steps.dart';
 
@@ -20,6 +21,7 @@ class HourlyBarChart extends StatelessWidget {
         ? 0
         : hours.map((h) => h.stepCount).reduce((a, b) => a > b ? a : b);
     final maxY = maxSteps <= 0 ? 1.0 : maxSteps * 1.2;
+    final interval = _niceInterval(maxY);
 
     return SizedBox(
       height: 220,
@@ -30,7 +32,7 @@ class HourlyBarChart extends StatelessWidget {
           gridData: FlGridData(
             show: true,
             drawVerticalLine: false,
-            horizontalInterval: _niceInterval(maxY),
+            horizontalInterval: interval,
           ),
           borderData: FlBorderData(
             show: true,
@@ -39,8 +41,29 @@ class HourlyBarChart extends StatelessWidget {
             ),
           ),
           titlesData: FlTitlesData(
-            leftTitles: const AxisTitles(
-              sideTitles: SideTitles(showTitles: false),
+            leftTitles: AxisTitles(
+              sideTitles: SideTitles(
+                showTitles: true,
+                reservedSize: 40,
+                interval: interval,
+                getTitlesWidget: (value, meta) {
+                  if (value < 0) return const SizedBox.shrink();
+                  // Same fix as the weekly chart: fl_chart always renders
+                  // an extra label at the axis's exact computed max, which
+                  // usually doesn't land on a clean interval multiple and
+                  // ends up overlapping the nearest real tick label. Only
+                  // draw a label when the value actually lands on our
+                  // interval.
+                  final remainder = value % interval;
+                  final onInterval =
+                      remainder < 0.5 || (interval - remainder) < 0.5;
+                  if (!onInterval) return const SizedBox.shrink();
+                  return Text(
+                    NumberFormat.compact().format(value),
+                    style: theme.textTheme.labelSmall,
+                  );
+                },
+              ),
             ),
             rightTitles: const AxisTitles(
               sideTitles: SideTitles(showTitles: false),
@@ -51,10 +74,16 @@ class HourlyBarChart extends StatelessWidget {
             bottomTitles: AxisTitles(
               sideTitles: SideTitles(
                 showTitles: true,
-                interval: 3,
+                // fl_chart's bar charts don't reliably honor `interval`
+                // for categorical x-axes the way a line chart's continuous
+                // axis does — it queries every single integer x-value
+                // regardless, which is why all 24 hour labels were
+                // rendering on top of each other. Filtering manually
+                // inside getTitlesWidget, same fix as the y-axis above.
                 getTitlesWidget: (value, meta) {
                   final hour = value.toInt();
                   if (hour < 0 || hour > 23) return const SizedBox.shrink();
+                  if (hour % 3 != 0) return const SizedBox.shrink();
                   return Padding(
                     padding: const EdgeInsets.only(top: 6),
                     child: Text(_hourLabel(hour),
