@@ -36,15 +36,15 @@ class PedometerService {
 
   Future<void> start() async {
     if (_bgStepSubscription != null || _starting) return;
+    _starting = true;
 
     final granted = await hasPermission();
     if (!granted) {
       debugPrint('[PedometerService] start() called without permission '
           'granted yet — skipping for now.');
+      _starting = false;
       return;
     }
-
-    _starting = true;
 
     final today = _todayString();
     final existing = await _dbHelper.getStepsForDate(today);
