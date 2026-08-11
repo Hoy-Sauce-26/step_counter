@@ -9,6 +9,7 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   await NotificationService.init();
+  await NotificationService.requestPermissions();
   await initializeBackgroundService();
 
   runApp(const ProviderScope(child: StepCounterApp()));

@@ -315,20 +315,28 @@
       ]
     },
     {
+      "name": "flutter_background_service_ios",
+      "version": "5.0.3",
+      "dependencies": [
+        "flutter",
+        "flutter_background_service_platform_interface"
+      ]
+    },
+    {
+      "name": "flutter_background_service_android",
+      "version": "6.3.1",
+      "dependencies": [
+        "flutter",
+        "flutter_background_service_platform_interface"
+      ]
+    },
+    {
       "name": "flutter_background_service_platform_interface",
       "version": "5.1.2",
       "dependencies": [
         "flutter",
         "platform",
         "plugin_platform_interface"
-      ]
-    },
-    {
-      "name": "flutter_background_service_ios",
-      "version": "5.0.3",
-      "dependencies": [
-        "flutter",
-        "flutter_background_service_platform_interface"
       ]
     },
     {
@@ -1088,14 +1096,6 @@
       "dependencies": [
         "meta",
         "source_span"
-      ]
-    },
-    {
-      "name": "flutter_background_service_android",
-      "version": "6.3.1",
-      "dependencies": [
-        "flutter",
-        "flutter_background_service_platform_interface"
       ]
     }
   ],

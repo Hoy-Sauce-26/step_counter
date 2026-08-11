@@ -30,8 +30,6 @@ class NotificationService {
       );
 
       await androidPlugin.createNotificationChannel(channel);
-
-      await androidPlugin.requestNotificationsPermission();
     }
   }
 
