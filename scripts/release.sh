@@ -29,4 +29,7 @@ echo $((BUILD_NUMBER + 1)) > "$BUILD_NUMBER_FILE"
 IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION_NAME"
 echo "${MAJOR}.${MINOR}.$((PATCH + 1))" > "$VERSION_NAME_FILE"
 
+git add . && git commit -m "Released version $VERSION_NAME"
+git push --set-upstream origin "$(git rev-parse --abbrev-ref HEAD)"
+
 echo "Done — v$VERSION_NAME (build $BUILD_NUMBER) at build/app/outputs/flutter-apk/roamfree_${VERSION_NAME}.apk"
