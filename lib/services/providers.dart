@@ -101,9 +101,9 @@ class HeightCmNotifier extends Notifier<double?> {
     state = await ref.read(preferencesServiceProvider).getHeightCm();
   }
 
-  Future<void> setHeight(double? inches) async {
-    state = inches;
-    await ref.read(preferencesServiceProvider).setHeightCm(inches);
+  Future<void> setHeight(double? cm) async {
+    state = cm;
+    await ref.read(preferencesServiceProvider).setHeightCm(cm);
   }
 }
 
