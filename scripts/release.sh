@@ -1,8 +1,8 @@
 #!/bin/bash
 set -e
 
-BUILD_NUMBER_FILE="android/build_number.txt"
-VERSION_NAME_FILE="android/version_name.txt"
+BUILD_NUMBER_FILE="android/next_build_number.txt"
+VERSION_NAME_FILE="android/next_version_name.txt"
 
 if [ ! -f "$BUILD_NUMBER_FILE" ]; then
   echo 1 > "$BUILD_NUMBER_FILE"
@@ -28,5 +28,8 @@ echo $((BUILD_NUMBER + 1)) > "$BUILD_NUMBER_FILE"
 # Auto-bump the patch (third) number for next time, e.g. 1.0.0 -> 1.0.1.
 IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION_NAME"
 echo "${MAJOR}.${MINOR}.$((PATCH + 1))" > "$VERSION_NAME_FILE"
+
+git add . && git commit -m "Released version $VERSION_NAME"
+git push --set-upstream origin "$(git rev-parse --abbrev-ref HEAD)"
 
 echo "Done — v$VERSION_NAME (build $BUILD_NUMBER) at build/app/outputs/flutter-apk/roamfree_${VERSION_NAME}.apk"

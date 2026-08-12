@@ -101,8 +101,9 @@ void onServiceStart(ServiceInstance service) async {
       // than waiting for a second event in the same hour.
       final existingHour =
           await dbHelper.getHourlyStepsForDateAndHour(today, currentHour);
-      hourStartDayTotal =
-          existingHour != null ? todaySteps - existingHour : lastTodaySteps;
+      hourStartDayTotal = existingHour != null
+          ? todaySteps - existingHour
+          : (lastTodaySteps ?? todaySteps);
     }
     final hourlySteps =
         (todaySteps - (hourStartDayTotal ?? todaySteps)).clamp(0, 1 << 30);
