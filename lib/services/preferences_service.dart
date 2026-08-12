@@ -1,5 +1,7 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'metrics.dart';
+
 /// Wraps SharedPreferences for the app's simple settings (daily step
 /// target and the step-count calibration factor).
 class PreferencesService {
@@ -29,5 +31,60 @@ class PreferencesService {
   Future<void> setCorrectionFactor(double factor) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setDouble(_correctionFactorKey, factor);
+  }
+
+  // Height/weight are nullable and unset by default — StepMetrics falls
+  // back to its flat-rate constants when either is missing, so
+  // personalization is opt-in, not required.
+  static const _heightCmKey = 'heightCm';
+  static const _weightKgKey = 'weightKg';
+
+  Future<double?> getHeightCm() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.containsKey(_heightCmKey)
+        ? prefs.getDouble(_heightCmKey)
+        : null;
+  }
+
+  Future<void> setHeightCm(double? cm) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (cm == null) {
+      await prefs.remove(_heightCmKey);
+    } else {
+      await prefs.setDouble(_heightCmKey, cm);
+    }
+  }
+
+  Future<double?> getWeightKg() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.containsKey(_weightKgKey)
+        ? prefs.getDouble(_weightKgKey)
+        : null;
+  }
+
+  Future<void> setWeightKg(double? kg) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (kg == null) {
+      await prefs.remove(_weightKgKey);
+    } else {
+      await prefs.setDouble(_weightKgKey, kg);
+    }
+  }
+
+  static const _unitSystemKey = 'unitSystem';
+  static const UnitSystem defaultUnitSystem = UnitSystem.metric;
+
+  Future<UnitSystem> getUnitSystem() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_unitSystemKey);
+    return raw == 'metric' ? UnitSystem.metric : UnitSystem.imperial;
+  }
+
+  Future<void> setUnitSystem(UnitSystem system) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      _unitSystemKey,
+      system == UnitSystem.metric ? 'metric' : 'imperial',
+    );
   }
 }

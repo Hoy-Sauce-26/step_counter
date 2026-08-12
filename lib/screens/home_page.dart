@@ -9,6 +9,7 @@ import '../widgets/charts/weekly_bar_chart.dart';
 import '../widgets/edit_target_dialog.dart';
 import '../widgets/hourly_breakdown_dialog.dart';
 import '../widgets/metric_card.dart';
+import '../widgets/personalize_dialog.dart';
 import '../widgets/step_progress_ring.dart';
 
 class HomePage extends ConsumerStatefulWidget {
@@ -92,6 +93,9 @@ class _HomePageState extends ConsumerState<HomePage>
   Widget build(BuildContext context) {
     final target = ref.watch(dailyTargetProvider);
     final calibrationFactor = ref.watch(calibrationFactorProvider);
+    final heightCm = ref.watch(heightCmProvider);
+    final weightKg = ref.watch(weightKgProvider);
+    final unitSystem = ref.watch(unitSystemProvider);
     final stepsAsync = ref.watch(todayStepsProvider);
     final walkingStatus = ref.watch(walkingStatusProvider).value;
 
@@ -99,6 +103,29 @@ class _HomePageState extends ConsumerState<HomePage>
       appBar: AppBar(
         title: const Text('Roamfree'),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.person_outline),
+            tooltip: 'Personalize',
+            onPressed: () async {
+              final result = await showPersonalizeDialog(
+                context,
+                currentHeightCm: heightCm,
+                currentWeightKg: weightKg,
+                currentUnitSystem: unitSystem,
+              );
+              if (result != null) {
+                ref
+                    .read(heightCmProvider.notifier)
+                    .setHeight(result.heightCm);
+                ref
+                    .read(weightKgProvider.notifier)
+                    .setWeight(result.weightKg);
+                ref
+                    .read(unitSystemProvider.notifier)
+                    .setSystem(result.unitSystem);
+              }
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.tune),
             tooltip: 'Calibrate step count',
@@ -138,6 +165,9 @@ class _HomePageState extends ConsumerState<HomePage>
                       steps: steps,
                       target: target,
                       walkingStatus: walkingStatus,
+                      heightCm: heightCm,
+                      weightKg: weightKg,
+                      unitSystem: unitSystem,
                     ),
                     loading: () =>
                         const Center(child: CircularProgressIndicator()),
@@ -154,12 +184,24 @@ class _StepContent extends ConsumerWidget {
   final int steps;
   final int target;
   final String? walkingStatus;
+  final double? heightCm;
+  final double? weightKg;
+  final UnitSystem unitSystem;
 
   const _StepContent({
     required this.steps,
     required this.target,
     this.walkingStatus,
+    this.heightCm,
+    this.weightKg,
+    required this.unitSystem,
   });
+
+  DistanceResult get _distance => StepMetrics.distance(
+        steps,
+        heightCm: heightCm,
+        unit: unitSystem,
+      );
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -211,14 +253,15 @@ class _StepContent extends ConsumerWidget {
               MetricCard(
                 icon: Icons.route,
                 label: 'Distance',
-                value: StepMetrics.distanceKm(steps).toStringAsFixed(2),
-                unit: 'km',
+                value: _distance.value.toStringAsFixed(2),
+                unit: _distance.unit,
               ),
               const SizedBox(width: 12),
               MetricCard(
                 icon: Icons.local_fire_department,
                 label: 'Calories',
-                value: StepMetrics.calories(steps).toStringAsFixed(0),
+                value: StepMetrics.calories(steps, weightKg: weightKg)
+                    .toStringAsFixed(0),
                 unit: 'kcal',
               ),
               const SizedBox(width: 12),

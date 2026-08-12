@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/daily_steps.dart';
 import '../models/hourly_steps.dart';
 import 'database_helper.dart';
+import 'metrics.dart';
 import 'pedometer_service.dart';
 import 'preferences_service.dart';
 
@@ -79,6 +80,75 @@ class CalibrationFactorNotifier extends Notifier<double> {
   Future<void> setFactor(double factor) async {
     state = factor;
     await ref.read(pedometerServiceProvider).setCorrectionFactor(factor);
+  }
+}
+
+/// The user's height in cm, if they've personalized it. Null means
+/// "use the flat-rate default" — see StepMetrics.distanceKm.
+final heightCmProvider =
+    NotifierProvider<HeightCmNotifier, double?>(
+  HeightCmNotifier.new,
+);
+
+class HeightCmNotifier extends Notifier<double?> {
+  @override
+  double? build() {
+    _load();
+    return null;
+  }
+
+  Future<void> _load() async {
+    state = await ref.read(preferencesServiceProvider).getHeightCm();
+  }
+
+  Future<void> setHeight(double? cm) async {
+    state = cm;
+    await ref.read(preferencesServiceProvider).setHeightCm(cm);
+  }
+}
+
+/// The user's weight in kg, if they've personalized it. Null means "use
+/// the flat-rate default" — see StepMetrics.calories.
+final weightKgProvider = NotifierProvider<WeightKgNotifier, double?>(
+  WeightKgNotifier.new,
+);
+
+class WeightKgNotifier extends Notifier<double?> {
+  @override
+  double? build() {
+    _load();
+    return null;
+  }
+
+  Future<void> _load() async {
+    state = await ref.read(preferencesServiceProvider).getWeightKg();
+  }
+
+  Future<void> setWeight(double? kg) async {
+    state = kg;
+    await ref.read(preferencesServiceProvider).setWeightKg(kg);
+  }
+}
+
+/// Which unit system to display values in throughout the app.
+final unitSystemProvider = NotifierProvider<UnitSystemNotifier, UnitSystem>(
+  UnitSystemNotifier.new,
+);
+
+class UnitSystemNotifier extends Notifier<UnitSystem> {
+  @override
+  UnitSystem build() {
+    _load();
+    return PreferencesService.defaultUnitSystem;
+  }
+
+  Future<void> _load() async {
+    state = await ref.read(preferencesServiceProvider).getUnitSystem();
+  }
+
+  Future<void> setSystem(UnitSystem system) async {
+    state = system;
+    await ref.read(preferencesServiceProvider).setUnitSystem(system);
   }
 }
 
