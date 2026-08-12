@@ -9,9 +9,15 @@ import 'database_helper.dart';
 import 'notification_service.dart';
 import 'preferences_service.dart';
 
+// Must match NotificationService's own channel/notification IDs exactly —
+// this makes the foreground service's required notification BE the live
+// step notification, rather than a separate second one.
 const backgroundNotificationChannelId = 'step_counter_channel';
 const backgroundNotificationId = 888;
 
+/// Configures the Android foreground service. Call once, before runApp().
+/// Does NOT start it — call `FlutterBackgroundService().startService()`
+/// once permission is confirmed granted (see home_page.dart).
 Future<void> initializeBackgroundService() async {
   final service = FlutterBackgroundService();
 
@@ -31,7 +37,12 @@ Future<void> initializeBackgroundService() async {
   );
 }
 
-/// This is the only place in the app that calls `Pedometer.stepCountStream.listen()`
+/// Entry point for the background isolate. This is now the ONLY place in
+/// the app that calls `Pedometer.stepCountStream.listen()` — see
+/// pedometer_service.dart's doc comment for why that has to stay true.
+/// The logic below (baseline resolution, day-rollover, correction factor)
+/// mirrors PedometerService._onStepCount exactly, since this isolate can't
+/// share Dart state with the main one.
 @pragma('vm:entry-point')
 void onServiceStart(ServiceInstance service) async {
   DartPluginRegistrant.ensureInitialized();
@@ -101,8 +112,9 @@ void onServiceStart(ServiceInstance service) async {
       // than waiting for a second event in the same hour.
       final existingHour =
           await dbHelper.getHourlyStepsForDateAndHour(today, currentHour);
-      hourStartDayTotal =
-          existingHour != null ? todaySteps - existingHour : lastTodaySteps;
+      hourStartDayTotal = existingHour != null
+          ? todaySteps - existingHour
+          : (lastTodaySteps ?? todaySteps);
     }
     final hourlySteps =
         (todaySteps - (hourStartDayTotal ?? todaySteps)).clamp(0, 1 << 30);
@@ -118,6 +130,8 @@ void onServiceStart(ServiceInstance service) async {
 
     lastTodaySteps = todaySteps;
 
+    // Forward to the main isolate too, so the UI updates instantly
+    // whenever the app happens to be open. No-op if nothing's listening.
     service.invoke('stepUpdate', {'steps': todaySteps, 'target': target});
     service.invoke('rawStep', {'raw': event.steps});
   });
