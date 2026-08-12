@@ -93,7 +93,7 @@ class _HomePageState extends ConsumerState<HomePage>
   Widget build(BuildContext context) {
     final target = ref.watch(dailyTargetProvider);
     final calibrationFactor = ref.watch(calibrationFactorProvider);
-    final heightInches = ref.watch(heightInchesProvider);
+    final heightCm = ref.watch(heightCmProvider);
     final weightKg = ref.watch(weightKgProvider);
     final unitSystem = ref.watch(unitSystemProvider);
     final stepsAsync = ref.watch(todayStepsProvider);
@@ -109,14 +109,14 @@ class _HomePageState extends ConsumerState<HomePage>
             onPressed: () async {
               final result = await showPersonalizeDialog(
                 context,
-                currentHeightInches: heightInches,
+                currentHeightCm: heightCm,
                 currentWeightKg: weightKg,
                 currentUnitSystem: unitSystem,
               );
               if (result != null) {
                 ref
-                    .read(heightInchesProvider.notifier)
-                    .setHeight(result.heightInches);
+                    .read(heightCmProvider.notifier)
+                    .setHeight(result.heightCm);
                 ref
                     .read(weightKgProvider.notifier)
                     .setWeight(result.weightKg);
@@ -165,7 +165,7 @@ class _HomePageState extends ConsumerState<HomePage>
                       steps: steps,
                       target: target,
                       walkingStatus: walkingStatus,
-                      heightInches: heightInches,
+                      heightCm: heightCm,
                       weightKg: weightKg,
                       unitSystem: unitSystem,
                     ),
@@ -184,7 +184,7 @@ class _StepContent extends ConsumerWidget {
   final int steps;
   final int target;
   final String? walkingStatus;
-  final double? heightInches;
+  final double? heightCm;
   final double? weightKg;
   final UnitSystem unitSystem;
 
@@ -192,14 +192,14 @@ class _StepContent extends ConsumerWidget {
     required this.steps,
     required this.target,
     this.walkingStatus,
-    this.heightInches,
+    this.heightCm,
     this.weightKg,
     required this.unitSystem,
   });
 
   DistanceResult get _distance => StepMetrics.distance(
         steps,
-        heightInches: heightInches,
+        heightCm: heightCm,
         unit: unitSystem,
       );
 

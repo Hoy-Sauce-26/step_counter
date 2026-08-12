@@ -83,14 +83,14 @@ class CalibrationFactorNotifier extends Notifier<double> {
   }
 }
 
-/// The user's height in inches, if they've personalized it. Null means
+/// The user's height in cm, if they've personalized it. Null means
 /// "use the flat-rate default" — see StepMetrics.distanceKm.
-final heightInchesProvider =
-    NotifierProvider<HeightInchesNotifier, double?>(
-  HeightInchesNotifier.new,
+final heightCmProvider =
+    NotifierProvider<HeightCmNotifier, double?>(
+  HeightCmNotifier.new,
 );
 
-class HeightInchesNotifier extends Notifier<double?> {
+class HeightCmNotifier extends Notifier<double?> {
   @override
   double? build() {
     _load();
@@ -98,12 +98,12 @@ class HeightInchesNotifier extends Notifier<double?> {
   }
 
   Future<void> _load() async {
-    state = await ref.read(preferencesServiceProvider).getHeightInches();
+    state = await ref.read(preferencesServiceProvider).getHeightCm();
   }
 
   Future<void> setHeight(double? inches) async {
     state = inches;
-    await ref.read(preferencesServiceProvider).setHeightInches(inches);
+    await ref.read(preferencesServiceProvider).setHeightCm(inches);
   }
 }
 

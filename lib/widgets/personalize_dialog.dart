@@ -3,11 +3,11 @@ import 'package:flutter/material.dart';
 import '../services/metrics.dart';
 
 class PersonalizeResult {
-  final double? heightInches;
+  final double? heightCm;
   final double? weightKg;
   final UnitSystem unitSystem;
   const PersonalizeResult({
-    this.heightInches,
+    this.heightCm,
     this.weightKg,
     required this.unitSystem,
   });
@@ -16,12 +16,12 @@ class PersonalizeResult {
 /// Shows a dialog to personalize height/weight and pick a display unit
 /// system. Fields shown reflect whichever unit is currently selected
 /// (feet/in + lbs for imperial, cm + kg for metric); toggling units
-/// re-seeds the fields from the saved canonical value (inches/kg) rather
+/// re-seeds the fields from the saved canonical value (cm/kg) rather
 /// than trying to live-convert partially-typed input. Returns null if
 /// cancelled.
 Future<PersonalizeResult?> showPersonalizeDialog(
   BuildContext context, {
-  required double? currentHeightInches,
+  required double? currentHeightCm,
   required double? currentWeightKg,
   required UnitSystem currentUnitSystem,
 }) {
@@ -29,7 +29,7 @@ Future<PersonalizeResult?> showPersonalizeDialog(
     context: context,
     builder: (context) {
       return _PersonalizeDialogContent(
-        currentHeightInches: currentHeightInches,
+        currentHeightCm: currentHeightCm,
         currentWeightKg: currentWeightKg,
         currentUnitSystem: currentUnitSystem,
       );
@@ -38,12 +38,12 @@ Future<PersonalizeResult?> showPersonalizeDialog(
 }
 
 class _PersonalizeDialogContent extends StatefulWidget {
-  final double? currentHeightInches;
+  final double? currentHeightCm;
   final double? currentWeightKg;
   final UnitSystem currentUnitSystem;
 
   const _PersonalizeDialogContent({
-    required this.currentHeightInches,
+    required this.currentHeightCm,
     required this.currentWeightKg,
     required this.currentUnitSystem,
   });
@@ -74,16 +74,15 @@ class _PersonalizeDialogContentState
   }
 
   void _seedFieldsFromCanonical() {
-    final heightInches = widget.currentHeightInches;
+    final heightCm = widget.currentHeightCm;
     final weightKg = widget.currentWeightKg;
 
-    if (heightInches != null) {
-      final feet = heightInches ~/ 12;
-      final inches = (heightInches % 12).round();
+    if (heightCm != null) {
+      _cmController.text = heightCm.toStringAsFixed(0);
+      final feet = (heightCm * StepMetrics.cmToInches) ~/ 12;
+      final inches = ((heightCm * StepMetrics.cmToInches) % 12).round();
       _feetController.text = feet.toString();
       _inchesController.text = inches.toString();
-      _cmController.text =
-          (heightInches * StepMetrics.inchesToCm).toStringAsFixed(0);
     }
     if (weightKg != null) {
       _lbsController.text =
@@ -102,17 +101,17 @@ class _PersonalizeDialogContentState
     super.dispose();
   }
 
-  double? get _heightInches {
-    if (_unit == UnitSystem.imperial) {
+  double? get _heightCm {
+    if (_unit == UnitSystem.metric) {
+      final cm = double.tryParse(_cmController.text.trim());
+      if (cm == null || cm <= 0) return null;
+      return cm;
+    } else {
       final ft = int.tryParse(_feetController.text.trim());
       final inch = int.tryParse(_inchesController.text.trim());
       if (ft == null && inch == null) return null;
-      final total = (ft ?? 0) * 12 + (inch ?? 0);
-      return total > 0 ? total.toDouble() : null;
-    } else {
-      final cm = double.tryParse(_cmController.text.trim());
-      if (cm == null || cm <= 0) return null;
-      return cm * StepMetrics.cmToInches;
+      final total = ((ft ?? 0) * 12) + (inch ?? 0);
+      return total > 0 ? total.toDouble() * StepMetrics.inchesToCm : null;
     }
   }
 
@@ -211,7 +210,7 @@ class _PersonalizeDialogContentState
         TextButton(
           onPressed: () => Navigator.of(context).pop(
             PersonalizeResult(
-              heightInches: null,
+              heightCm: null,
               weightKg: null,
               unitSystem: _unit,
             ),
@@ -221,7 +220,7 @@ class _PersonalizeDialogContentState
         FilledButton(
           onPressed: () => Navigator.of(context).pop(
             PersonalizeResult(
-              heightInches: _heightInches,
+              heightCm: _heightCm,
               weightKg: _weightKg,
               unitSystem: _unit,
             ),

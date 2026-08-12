@@ -36,22 +36,22 @@ class PreferencesService {
   // Height/weight are nullable and unset by default — StepMetrics falls
   // back to its flat-rate constants when either is missing, so
   // personalization is opt-in, not required.
-  static const _heightInchesKey = 'heightInches';
+  static const _heightCmKey = 'heightCm';
   static const _weightKgKey = 'weightKg';
 
-  Future<double?> getHeightInches() async {
+  Future<double?> getHeightCm() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.containsKey(_heightInchesKey)
-        ? prefs.getDouble(_heightInchesKey)
+    return prefs.containsKey(_heightCmKey)
+        ? prefs.getDouble(_heightCmKey)
         : null;
   }
 
-  Future<void> setHeightInches(double? inches) async {
+  Future<void> setHeightCm(double? cm) async {
     final prefs = await SharedPreferences.getInstance();
-    if (inches == null) {
-      await prefs.remove(_heightInchesKey);
+    if (cm == null) {
+      await prefs.remove(_heightCmKey);
     } else {
-      await prefs.setDouble(_heightInchesKey, inches);
+      await prefs.setDouble(_heightCmKey, cm);
     }
   }
 
@@ -71,11 +71,8 @@ class PreferencesService {
     }
   }
 
-  // Which unit system to DISPLAY values in. Stored data (height in
-  // inches, weight in kg) never changes based on this — it's purely a
-  // display/input preference, applied wherever values are shown or typed.
   static const _unitSystemKey = 'unitSystem';
-  static const UnitSystem defaultUnitSystem = UnitSystem.imperial;
+  static const UnitSystem defaultUnitSystem = UnitSystem.metric;
 
   Future<UnitSystem> getUnitSystem() async {
     final prefs = await SharedPreferences.getInstance();

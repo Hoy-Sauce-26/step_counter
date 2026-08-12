@@ -27,7 +27,7 @@ class StepMetrics {
   // Personalization formulas.
   static const double strideFactor = 0.415; // stride length = height * this
   static const double averageMets = 2.8; // average walking MET value
-  static const double _inchesToKm = 0.0000254;
+  static const double _cmToKm = 0.00001;
   static const double lbsToKg = 0.45359237;
   static const double kgToLbs = 1 / lbsToKg;
   static const double inchesToCm = 2.54;
@@ -35,28 +35,28 @@ class StepMetrics {
   static const double kmToMiles = 0.621371;
 
   /// Distance in km (the canonical internal unit — see [distance] for a
-  /// unit-aware version). If [heightInches] is provided, stride length is
+  /// unit-aware version). If [heightCm] is provided, stride length is
   /// derived as `height * 0.415` (a standard walking-stride estimate)
   /// rather than using the flat [kmPerStep] average.
-  static double distanceKm(int steps, {double? heightInches}) {
-    if (heightInches == null || heightInches <= 0) {
+  static double distanceKm(int steps, {double? heightCm}) {
+    if (heightCm == null || heightCm <= 0) {
       return steps * kmPerStep;
     }
-    final strideKm = heightInches * strideFactor * _inchesToKm;
+    final strideKm = heightCm * strideFactor * _cmToKm;
     return steps * strideKm;
   }
 
   /// Distance in whichever unit [unit] specifies, with its label attached.
   static DistanceResult distance(
     int steps, {
-    double? heightInches,
+    double? heightCm,
     required UnitSystem unit,
   }) {
-    final km = distanceKm(steps, heightInches: heightInches);
-    if (unit == UnitSystem.imperial) {
-      return DistanceResult(km * kmToMiles, 'mi');
+    final km = distanceKm(steps, heightCm: heightCm);
+    if (unit == UnitSystem.metric) {
+      return DistanceResult(km, 'km');
     }
-    return DistanceResult(km, 'km');
+    return DistanceResult(km * kmToMiles, 'mi');
   }
 
   /// Calories burned. If [weightKg] is provided, uses the standard MET
