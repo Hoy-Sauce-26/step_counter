@@ -1,8 +1,8 @@
 #!/bin/bash
 set -e
 
-BUILD_NUMBER_FILE="android/build_number.txt"
-VERSION_NAME_FILE="android/version_name.txt"
+BUILD_NUMBER_FILE="android/next_build_number.txt"
+VERSION_NAME_FILE="android/next_version_name.txt"
 
 if [ ! -f "$BUILD_NUMBER_FILE" ]; then
   echo 1 > "$BUILD_NUMBER_FILE"
