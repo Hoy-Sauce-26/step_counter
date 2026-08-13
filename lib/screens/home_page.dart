@@ -97,7 +97,6 @@ class _HomePageState extends ConsumerState<HomePage>
     final weightKg = ref.watch(weightKgProvider);
     final unitSystem = ref.watch(unitSystemProvider);
     final stepsAsync = ref.watch(todayStepsProvider);
-    final walkingStatus = ref.watch(walkingStatusProvider).value;
 
     return Scaffold(
       appBar: AppBar(
@@ -164,7 +163,6 @@ class _HomePageState extends ConsumerState<HomePage>
                     data: (steps) => _StepContent(
                       steps: steps,
                       target: target,
-                      walkingStatus: walkingStatus,
                       heightCm: heightCm,
                       weightKg: weightKg,
                       unitSystem: unitSystem,
@@ -183,7 +181,6 @@ class _HomePageState extends ConsumerState<HomePage>
 class _StepContent extends ConsumerWidget {
   final int steps;
   final int target;
-  final String? walkingStatus;
   final double? heightCm;
   final double? weightKg;
   final UnitSystem unitSystem;
@@ -191,7 +188,6 @@ class _StepContent extends ConsumerWidget {
   const _StepContent({
     required this.steps,
     required this.target,
-    this.walkingStatus,
     this.heightCm,
     this.weightKg,
     required this.unitSystem,
@@ -227,26 +223,6 @@ class _StepContent extends ConsumerWidget {
         children: [
           const SizedBox(height: 8),
           StepProgressRing(currentSteps: steps, dailyTarget: target),
-          if (steps == 0) ...[
-            const SizedBox(height: 16),
-            if (walkingStatus == 'walking')
-              Chip(
-                avatar: Icon(Icons.directions_walk,
-                    size: 18, color: theme.colorScheme.primary),
-                label: const Text('Motion detected'),
-              ),
-            const SizedBox(height: 8),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Text(
-                'Waiting for your first step to be detected — take a few '
-                'steps with your phone on you.',
-                textAlign: TextAlign.center,
-                style: theme.textTheme.bodySmall
-                    ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-              ),
-            ),
-          ],
           const SizedBox(height: 24),
           Row(
             children: [

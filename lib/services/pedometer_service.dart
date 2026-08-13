@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
-import 'package:pedometer/pedometer.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import 'database_helper.dart';
@@ -10,11 +9,9 @@ import 'notification_service.dart';
 import 'preferences_service.dart';
 
 class PedometerService {
-  StreamSubscription<PedestrianStatus>? _statusSubscription;
   StreamSubscription<dynamic>? _bgStepSubscription;
   StreamSubscription<dynamic>? _bgRawSubscription;
   final _controller = StreamController<int>.broadcast();
-  final _statusController = StreamController<String>.broadcast();
   final _rawCumulativeController = StreamController<int>.broadcast();
   final _dbHelper = DatabaseHelper.instance;
   final _prefsService = PreferencesService();
@@ -22,8 +19,6 @@ class PedometerService {
   bool _starting = false;
 
   Stream<int> get todayStepsStream => _controller.stream;
-
-  Stream<String> get walkingStatusStream => _statusController.stream;
 
   Future<bool> requestPermission() async {
     final status = await Permission.activityRecognition.request();
@@ -66,16 +61,6 @@ class PedometerService {
       _rawCumulativeController.add(raw);
     });
 
-    _statusSubscription = Pedometer.pedestrianStatusStream.listen(
-      (status) {
-        debugPrint('[PedometerService] pedestrian status: ${status.status} '
-            'at ${DateTime.now()}');
-        _statusController.add(status.status);
-      },
-      onError: (Object error) => _statusController.add('unknown'),
-      cancelOnError: false,
-    );
-
     _starting = false;
   }
 
@@ -104,14 +89,11 @@ class PedometerService {
     _bgStepSubscription = null;
     _bgRawSubscription?.cancel();
     _bgRawSubscription = null;
-    _statusSubscription?.cancel();
-    _statusSubscription = null;
   }
 
   void dispose() {
     stop();
     _controller.close();
-    _statusController.close();
     _rawCumulativeController.close();
   }
 

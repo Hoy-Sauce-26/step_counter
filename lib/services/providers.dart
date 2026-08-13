@@ -29,15 +29,6 @@ final todayStepsProvider = StreamProvider<int>((ref) {
   return service.todayStepsStream;
 });
 
-/// 'walking' / 'stopped' / 'unknown' — a faster-reacting motion signal,
-/// separate from the (batched, slower-to-update) step counter. Used only
-/// to give the UI something to show while the counter is still warming up.
-final walkingStatusProvider = StreamProvider<String>((ref) {
-  final service = ref.watch(pedometerServiceProvider);
-  service.start();
-  return service.walkingStatusStream;
-});
-
 /// The user's configured daily step target (defaults to 10,000).
 final dailyTargetProvider = NotifierProvider<DailyTargetNotifier, int>(
   DailyTargetNotifier.new,

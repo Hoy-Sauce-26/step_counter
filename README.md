@@ -49,7 +49,6 @@ The current, correct ownership split:
 | Sensor stream | Owner | Why |
 | :--- | :--- | :--- |
 | `Pedometer.stepCountStream` (step count) | `background_service.dart`, inside `onServiceStart` | Needs to keep running when the app is backgrounded, killed, or not yet opened — a main-isolate listener can't survive any of those. |
-| `Pedometer.pedestrianStatusStream` (walking/stopped) | `PedometerService`, main isolate | Separate native channel, never involved in the conflict above — used only for the "Motion detected" chip while waiting for the first step. |
 
 The main app never talks to the step-count sensor directly. `PedometerService`
 listens to the background service's `stepUpdate` / `rawStep` broadcasts
