@@ -72,19 +72,18 @@ class PreferencesService {
   }
 
   static const _unitSystemKey = 'unitSystem';
-  static const UnitSystem defaultUnitSystem = UnitSystem.metric;
 
   Future<UnitSystem> getUnitSystem() async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_unitSystemKey);
-    return raw == 'metric' ? UnitSystem.metric : UnitSystem.imperial;
+    return raw == 'imperial' ? UnitSystem.imperial : UnitSystem.metric;
   }
 
   Future<void> setUnitSystem(UnitSystem system) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(
       _unitSystemKey,
-      system == UnitSystem.metric ? 'metric' : 'imperial',
+      system == UnitSystem.imperial ? 'imperial' : 'metric',
     );
   }
 }

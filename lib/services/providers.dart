@@ -139,7 +139,7 @@ class UnitSystemNotifier extends Notifier<UnitSystem> {
   @override
   UnitSystem build() {
     _load();
-    return PreferencesService.defaultUnitSystem;
+    return UnitSystem.metric; // Defaults to metric.
   }
 
   Future<void> _load() async {
