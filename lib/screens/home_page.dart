@@ -227,26 +227,6 @@ class _StepContent extends ConsumerWidget {
         children: [
           const SizedBox(height: 8),
           StepProgressRing(currentSteps: steps, dailyTarget: target),
-          if (steps == 0) ...[
-            const SizedBox(height: 16),
-            if (walkingStatus == 'walking')
-              Chip(
-                avatar: Icon(Icons.directions_walk,
-                    size: 18, color: theme.colorScheme.primary),
-                label: const Text('Motion detected'),
-              ),
-            const SizedBox(height: 8),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Text(
-                'Waiting for your first step to be detected — take a few '
-                'steps with your phone on you.',
-                textAlign: TextAlign.center,
-                style: theme.textTheme.bodySmall
-                    ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-              ),
-            ),
-          ],
           const SizedBox(height: 24),
           Row(
             children: [
