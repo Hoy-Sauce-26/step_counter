@@ -47,8 +47,7 @@ mv build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/r
 # doesn't burn a number or bump the version.
 echo $((BUILD_NUMBER + 1)) > "$BUILD_NUMBER_FILE"
 
-NEXT_VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))"
-echo "$NEXT_VERSION" > "$VERSION_NAME_FILE"
+echo "${MAJOR}.${MINOR}.$((PATCH + 1))" > "$VERSION_NAME_FILE"
 
 git add . && git commit -m "Released version $VERSION_NAME"
 git push --set-upstream origin "$(git rev-parse --abbrev-ref HEAD)"
