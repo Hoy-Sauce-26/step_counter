@@ -212,13 +212,35 @@ class _RouteRow extends StatelessWidget {
       ),
       child: Card(
         margin: const EdgeInsets.only(bottom: 8),
-        child: ListTile(
-          title: Text(route.name),
-          subtitle: Text(estimate),
-          trailing: FilledButton.tonalIcon(
-            icon: const Icon(Icons.play_arrow),
-            label: const Text('Start Route'),
-            onPressed: onStart,
+        child: Padding(
+          // Same Row/Padding shape as the add-route row above, so both
+          // rows' text and buttons line up on the same horizontal insets —
+          // ListTile's default contentPadding (16) didn't match this
+          // Padding's 12, so it read a few pixels out of line.
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(route.name, style: Theme.of(context).textTheme.titleMedium),
+                    Text(
+                      estimate,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              FilledButton.tonalIcon(
+                icon: const Icon(Icons.play_arrow),
+                label: const Text('Start Route'),
+                onPressed: onStart,
+              ),
+            ],
           ),
         ),
       ),
