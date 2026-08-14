@@ -13,12 +13,10 @@ class PersonalizeResult {
   });
 }
 
-/// Shows a dialog to personalize height/weight and pick a display unit
-/// system. Fields shown reflect whichever unit is currently selected
-/// (feet/in + lbs for imperial, cm + kg for metric); toggling units
-/// re-seeds the fields from the saved canonical value (cm/kg) rather
-/// than trying to live-convert partially-typed input. Returns null if
-/// cancelled.
+/// Dialog to personalize height/weight and pick a unit system. Shows
+/// feet/in + lbs for imperial, cm + kg for metric; toggling units re-seeds
+/// from the saved canonical value rather than live-converting typed
+/// input. Returns null if cancelled.
 Future<PersonalizeResult?> showPersonalizeDialog(
   BuildContext context, {
   required double? currentHeightCm,

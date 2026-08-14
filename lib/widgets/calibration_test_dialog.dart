@@ -9,12 +9,9 @@ const _minStepsToFinish = 20;
 const _calibrationMin = 0.9;
 const _calibrationMax = 1.1;
 
-/// Walks the user through a short calibration test: tap Start, take
-/// (ideally) exactly 100 real steps, tap Done. Compares the raw sensor
-/// count against the known 100 to suggest a calibration factor, clamped to
-/// the same 90%-110% range as the manual slider.
-///
-/// Returns the computed factor, or null if cancelled.
+/// Guided calibration test: tap Start, walk ~100 steps, tap Done.
+/// Compares the raw count to 100 and suggests a factor, clamped to the
+/// same 90-110% range as the manual slider. Returns null if cancelled.
 Future<double?> showCalibrationTestDialog(
   BuildContext context,
   PedometerService pedometerService,

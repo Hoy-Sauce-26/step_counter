@@ -7,8 +7,7 @@ import 'package:intl/intl.dart';
 import '../../models/hourly_steps.dart';
 
 /// Bar chart for a single day's hourly breakdown: 24 bars, one per hour.
-/// Deliberately simple relative to the weekly chart — no target-based
-/// coloring, since a target is a daily concept, not an hourly one.
+/// No target-based coloring — target is a daily concept, not hourly.
 class HourlyBarChart extends StatelessWidget {
   final List<HourlySteps> hours; // zero-filled, length 24, hour 0-23
 
@@ -48,12 +47,9 @@ class HourlyBarChart extends StatelessWidget {
                 interval: interval,
                 getTitlesWidget: (value, meta) {
                   if (value < 0) return const SizedBox.shrink();
-                  // Same fix as the weekly chart: fl_chart always renders
-                  // an extra label at the axis's exact computed max, which
-                  // usually doesn't land on a clean interval multiple and
-                  // ends up overlapping the nearest real tick label. Only
-                  // draw a label when the value actually lands on our
-                  // interval.
+                  // Same fix as the weekly chart's y-axis — only draw
+                  // labels that land on our interval, avoiding overlap
+                  // with fl_chart's auto label at the axis max.
                   final remainder = value % interval;
                   final onInterval =
                       remainder < 0.5 || (interval - remainder) < 0.5;
@@ -74,12 +70,9 @@ class HourlyBarChart extends StatelessWidget {
             bottomTitles: AxisTitles(
               sideTitles: SideTitles(
                 showTitles: true,
-                // fl_chart's bar charts don't reliably honor `interval`
-                // for categorical x-axes the way a line chart's continuous
-                // axis does — it queries every single integer x-value
-                // regardless, which is why all 24 hour labels were
-                // rendering on top of each other. Filtering manually
-                // inside getTitlesWidget, same fix as the y-axis above.
+                // fl_chart ignores `interval` for categorical x-axes, so
+                // all 24 hours would render on top of each other — filter
+                // manually instead, same as the y-axis fix above.
                 getTitlesWidget: (value, meta) {
                   final hour = value.toInt();
                   if (hour < 0 || hour > 23) return const SizedBox.shrink();

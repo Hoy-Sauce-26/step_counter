@@ -2,15 +2,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'metrics.dart';
 
-/// Wraps SharedPreferences for the app's simple settings (daily step
-/// target and the step-count calibration factor).
+/// Wraps SharedPreferences for the app's settings (target, calibration,
+/// personalization, unit system).
 class PreferencesService {
   static const _dailyTargetKey = 'dailyTarget';
   static const _correctionFactorKey = 'stepCorrectionFactor';
   static const int defaultDailyTarget = 10000;
 
-  /// 1.0 = trust the sensor as-is. 0.93, for example, scales every raw
-  /// reading down by 7% to correct for a sensor that's overcounting.
+  /// 1.0 = trust the sensor as-is; e.g. 0.93 scales readings down 7%.
   static const double defaultCorrectionFactor = 1.0;
 
   Future<int> getDailyTarget() async {
@@ -33,9 +32,8 @@ class PreferencesService {
     await prefs.setDouble(_correctionFactorKey, factor);
   }
 
-  // Height/weight are nullable and unset by default — StepMetrics falls
-  // back to its flat-rate constants when either is missing, so
-  // personalization is opt-in, not required.
+  // Nullable/unset by default — StepMetrics falls back to flat-rate
+  // constants when missing, so personalization is opt-in.
   static const _heightCmKey = 'heightCm';
   static const _weightKgKey = 'weightKg';
 

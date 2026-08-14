@@ -4,10 +4,9 @@ import 'package:sqflite/sqflite.dart';
 import '../models/daily_steps.dart';
 import '../models/hourly_steps.dart';
 
-/// Handles all local persistence of daily and hourly step records via
-/// sqflite.
+/// Local persistence for daily and hourly step records via sqflite.
 ///
-/// Table schema:
+/// Schema:
 ///   daily_steps(date TEXT PRIMARY KEY, stepCount INTEGER NOT NULL)
 ///   hourly_steps(date TEXT, hour INTEGER, stepCount INTEGER NOT NULL,
 ///                PRIMARY KEY(date, hour))
@@ -45,8 +44,8 @@ class DatabaseHelper {
         ''');
       },
       onUpgrade: (db, oldVersion, newVersion) async {
-        // Existing installs (v1) only have daily_steps — add the new
-        // hourly table without touching any existing data.
+        // v1 installs only have daily_steps — add hourly_steps without
+        // touching existing data.
         if (oldVersion < 2) {
           await db.execute('''
             CREATE TABLE hourly_steps (
@@ -118,10 +117,9 @@ class DatabaseHelper {
     );
   }
 
-  /// The persisted step count for one specific (date, hour), or null if
-  /// nothing's been recorded for it yet. Used by the background service to
-  /// correctly resume mid-hour after a restart, rather than losing or
-  /// double-counting that hour's steps.
+  /// Persisted step count for one (date, hour), or null if not recorded
+  /// yet. Lets the background service resume mid-hour after a restart
+  /// instead of losing or double-counting steps.
   Future<int?> getHourlyStepsForDateAndHour(String date, int hour) async {
     final db = await database;
     final rows = await db.query(
