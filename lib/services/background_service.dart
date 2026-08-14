@@ -57,6 +57,12 @@ void onServiceStart(ServiceInstance service) async {
   int? baseline;
   double correctionFactor = await prefsService.getCorrectionFactor();
 
+  // Steps manually credited to today (e.g. a route logged without live
+  // tracking) — added on top of the sensor-derived total below. Kept
+  // separate from `baseline` so a real step never has to "know about" it;
+  // it's just an extra addend applied every time the total is computed.
+  int manualSteps = await prefsService.getManualSteps(_todayString());
+
   // Hourly bucketing: hourStartDayTotal is the day's running total when
   // the current hour began — same idea as the daily baseline, one level in.
   String? trackedHourKey;
@@ -122,6 +128,36 @@ void onServiceStart(ServiceInstance service) async {
     );
   });
 
+  service.on('addManualSteps').listen((event) async {
+    final amount = event?['steps'] as int?;
+    if (amount == null || amount <= 0) return;
+    final today = _todayString();
+    if (trackedDate != today) {
+      // No step has landed since midnight yet, so the day hasn't rolled
+      // over on the sensor-driven path below — resolve it here too, so
+      // this addition lands on the right day instead of yesterday's.
+      trackedDate = today;
+      manualSteps = await prefsService.getManualSteps(today);
+      lastTodaySteps = null;
+      trackedHourKey = null;
+    }
+    manualSteps += amount;
+    await prefsService.setManualSteps(today, manualSteps);
+
+    // Push an immediate update rather than waiting for the next real step.
+    final newTotal = (lastTodaySteps ?? 0) + amount;
+    lastTodaySteps = newTotal;
+    final target = await prefsService.getDailyTarget();
+    await dbHelper.upsertSteps(DailySteps(date: today, stepCount: newTotal));
+    if (activeRoute == null) {
+      await NotificationService.updateStepNotification(
+        steps: newTotal,
+        target: target,
+      );
+    }
+    service.invoke('stepUpdate', {'steps': newTotal, 'target': target});
+  });
+
   // The date check below only runs on a step event, which can be hours
   // after midnight — until then the notification shows yesterday's count.
   // Schedule a single midnight timer instead of polling for it (skipped
@@ -142,6 +178,7 @@ void onServiceStart(ServiceInstance service) async {
         event.steps,
         correctionFactor,
       );
+      manualSteps = await prefsService.getManualSteps(today);
       // New day: yesterday's "day total so far" no longer applies.
       lastTodaySteps = null;
       trackedHourKey = null;
@@ -149,7 +186,8 @@ void onServiceStart(ServiceInstance service) async {
 
     final rawDelta =
         (event.steps - (baseline ?? event.steps)).clamp(0, 1 << 30);
-    final todaySteps = (rawDelta * correctionFactor).round();
+    final sensorSteps = (rawDelta * correctionFactor).round();
+    final displaySteps = sensorSteps + manualSteps;
     final target = await prefsService.getDailyTarget();
 
     // Hourly bucketing.
@@ -164,17 +202,17 @@ void onServiceStart(ServiceInstance service) async {
       final existingHour =
           await dbHelper.getHourlyStepsForDateAndHour(today, currentHour);
       hourStartDayTotal = existingHour != null
-          ? todaySteps - existingHour
-          : (lastTodaySteps ?? todaySteps);
+          ? displaySteps - existingHour
+          : (lastTodaySteps ?? displaySteps);
     }
     final hourlySteps =
-        (todaySteps - (hourStartDayTotal ?? todaySteps)).clamp(0, 1 << 30);
+        (displaySteps - (hourStartDayTotal ?? displaySteps)).clamp(0, 1 << 30);
 
     await dbHelper.upsertSteps(
-      DailySteps(date: today, stepCount: todaySteps),
+      DailySteps(date: today, stepCount: displaySteps),
     );
     await dbHelper.upsertHourlySteps(today, currentHour, hourlySteps);
-    lastTodaySteps = todaySteps;
+    lastTodaySteps = displaySteps;
 
     // Steps always count toward the daily total above regardless of an
     // active route — only the notification display branches.
@@ -202,12 +240,12 @@ void onServiceStart(ServiceInstance service) async {
       service.invoke('routeUpdate', {'steps': routeSteps});
     } else {
       await NotificationService.updateStepNotification(
-        steps: todaySteps,
+        steps: displaySteps,
         target: target,
       );
     }
 
-    service.invoke('stepUpdate', {'steps': todaySteps, 'target': target});
+    service.invoke('stepUpdate', {'steps': displaySteps, 'target': target});
     service.invoke('rawStep', {'raw': event.steps});
   });
 }
