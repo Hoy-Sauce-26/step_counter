@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui';
 
 import 'package:flutter_background_service/flutter_background_service.dart';
@@ -56,10 +57,20 @@ void onServiceStart(ServiceInstance service) async {
   int? baseline;
   double correctionFactor = await prefsService.getCorrectionFactor();
 
-  // Hourly-bucket tracking. `hourStartDayTotal` is the day's cumulative
-  // total at the moment the current hour began — an hour's step count is
-  // just (today's running total right now) minus that value, mirroring
-  // exactly how the daily baseline works, one level nested.
+  // Applies a live recalibration immediately, instead of waiting for the
+  // daily baseline refresh below to pick up the new factor from prefs.
+  service.on('setCorrectionFactor').listen((event) {
+    final factor = (event?['factor'] as num?)?.toDouble();
+    if (factor != null) correctionFactor = factor;
+  });
+
+  // The date check below only runs on a step event, which can be hours
+  // after midnight — until then the notification shows yesterday's count.
+  // Schedule a single midnight timer instead of polling for it.
+  _scheduleMidnightNotificationReset(prefsService);
+
+  // Hourly bucketing: hourStartDayTotal is the day's running total when
+  // the current hour began — same idea as the daily baseline, one level in.
   String? trackedHourKey;
   int? hourStartDayTotal;
   int? lastTodaySteps;
@@ -92,13 +103,10 @@ void onServiceStart(ServiceInstance service) async {
     final hourKey = '$today-$currentHour';
     if (trackedHourKey != hourKey) {
       trackedHourKey = hourKey;
-      // If this specific hour already has a persisted count (the service
-      // restarted mid-hour, e.g. after a reboot), reconstruct the
-      // baseline from it so this hour resumes rather than resets or
-      // double-counts. Otherwise, this is a genuinely fresh hour — treat
-      // the day-total as of the previous event as its starting point, so
-      // this very first event's own step(s) show up immediately rather
-      // than waiting for a second event in the same hour.
+      // If this hour already has a persisted count (service restarted
+      // mid-hour), resume from it instead of resetting or double
+      // counting. Otherwise start from the previous event's day-total so
+      // this hour's first step shows up right away.
       final existingHour =
           await dbHelper.getHourlyStepsForDateAndHour(today, currentHour);
       hourStartDayTotal = existingHour != null
@@ -121,6 +129,20 @@ void onServiceStart(ServiceInstance service) async {
 
     service.invoke('stepUpdate', {'steps': todaySteps, 'target': target});
     service.invoke('rawStep', {'raw': event.steps});
+  });
+}
+
+/// Fires once at the next local midnight, resets the notification to
+/// 0/target, and reschedules itself for the following midnight. Doesn't
+/// touch the sensor/baseline state — that resolves on the first real
+/// step regardless; this just stops the notification from lagging.
+void _scheduleMidnightNotificationReset(PreferencesService prefsService) {
+  final now = DateTime.now();
+  final nextMidnight = DateTime(now.year, now.month, now.day + 1);
+  Timer(nextMidnight.difference(now), () async {
+    final target = await prefsService.getDailyTarget();
+    await NotificationService.updateStepNotification(steps: 0, target: target);
+    _scheduleMidnightNotificationReset(prefsService);
   });
 }
 

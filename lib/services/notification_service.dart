@@ -33,15 +33,13 @@ class NotificationService {
     }
   }
 
-  // Adding so I can add an "enable notifications" button if we require a manual
-  // way later. Maybe useless.
+  // For a future "enable notifications" button, if we need one manually.
   static Future<void> requestPermissions() async {
     final androidImplementation = _notificationsPlugin.resolvePlatformSpecificImplementation<
         AndroidFlutterLocalNotificationsPlugin>();
     await androidImplementation?.requestNotificationsPermission();
   }
 
-  // Maybe worth moving out into an Ids file if we need more hardcoding.
   static const int _stepNotificationId = 888;
 
   static Future<void> updateStepNotification({
@@ -77,9 +75,5 @@ class NotificationService {
       body: '${percentage.toStringAsFixed(1)}% of your daily goal reached!',
       notificationDetails: notificationDetails,
     );
-  }
-
-  static Future<void> cancelNotification() async {
-    await _notificationsPlugin.cancel(id: _stepNotificationId);
   }
 }

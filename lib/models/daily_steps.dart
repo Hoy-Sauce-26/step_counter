@@ -1,8 +1,5 @@
-/// Represents a single day's step count record.
-///
-/// [date] is stored as an ISO-8601 date string (yyyy-MM-dd) so that
-/// lexicographic string comparisons in SQL (BETWEEN, ORDER BY, LIKE)
-/// line up with chronological order.
+/// A single day's step count. [date] is ISO-8601 (yyyy-MM-dd) so plain
+/// string comparisons in SQL (BETWEEN, ORDER BY, LIKE) sort chronologically.
 class DailySteps {
   final String date; // ISO-8601, e.g. "2026-08-08"
   final int stepCount;

@@ -8,15 +8,11 @@ import '../../models/daily_steps.dart';
 
 /// Bar chart for the past 7 days.
 ///
-/// - The y-axis is always labeled, with a floor of [dailyTarget] — it only
-///   extends higher if some day in the week actually beat the target, so
-///   the target is never scrolled off the top of a mostly-under-target
-///   week.
-/// - Each bar is colored by whether that day met the target: theme primary
-///   if it did, gray if it didn't.
-/// - A dashed reference line marks the target itself.
-/// - Tapping a bar shows the exact date and step count, and calls
-///   [onDaySelected] with that day's date, if provided.
+/// - Y-axis floors at [dailyTarget], only growing if a day beat it, so
+///   the target line never scrolls off-screen.
+/// - Bars are colored primary if that day hit the target, gray if not.
+/// - A dashed line marks the target.
+/// - Tapping a bar calls [onDaySelected] with that day's date.
 class WeeklyBarChart extends StatelessWidget {
   final List<DailySteps> last7Days; // zero-filled, chronological, len 7
   final int dailyTarget;
@@ -66,11 +62,9 @@ class WeeklyBarChart extends StatelessWidget {
               color: theme.colorScheme.outline,
               strokeWidth: 1.5,
               dashArray: const [6, 4],
-              // No inline label here on purpose — wherever it's anchored
-              // (left, right, or centered), some day's bar can end up
-              // right behind it depending on the data. The target value
-              // is shown as text in the section header above instead,
-              // where nothing can ever overlap it.
+              // No inline label — any anchor position can end up behind
+              // a bar depending on the data. Target value is shown in
+              // the header above instead.
             ),
           ]),
           titlesData: FlTitlesData(
@@ -81,13 +75,10 @@ class WeeklyBarChart extends StatelessWidget {
                 interval: interval,
                 getTitlesWidget: (value, meta) {
                   if (value < 0) return const SizedBox.shrink();
-                  // fl_chart always renders a label at the axis's exact
-                  // computed max in addition to the interval-based ticks,
-                  // which — since that max is usually not a clean multiple
-                  // of `interval` — ends up overlapping the nearest real
-                  // tick label (e.g. a "2.05K" boundary label crowding a
-                  // "2K" gridline label right next to it). Only draw a
-                  // label when the value actually lands on our interval.
+                  // fl_chart always adds a label at the axis max, which
+                  // usually isn't a clean interval multiple and ends up
+                  // overlapping the nearest tick label. Only draw labels
+                  // that land on our interval.
                   final remainder = value % interval;
                   final onInterval =
                       remainder < 0.5 || (interval - remainder) < 0.5;

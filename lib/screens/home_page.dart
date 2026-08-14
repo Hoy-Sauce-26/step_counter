@@ -40,18 +40,12 @@ class _HomePageState extends ConsumerState<HomePage>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      // Fixes a real bug: without this, if the calendar date rolled over
-      // while the app was closed and no step has happened yet today, the
-      // UI keeps showing yesterday's stale total until a fresh step event
-      // forces a recheck — confusing on exactly the mornings someone
-      // opens the app first thing. Re-seeding on every resume means the
-      // displayed value is always correct the instant the screen appears.
+      // Re-sync on resume, so a date rollover while the app was closed
+      // doesn't leave yesterday's total on screen until the next step.
       ref.read(pedometerServiceProvider).refreshForCurrentDate();
 
-      // Defensive: if the background service somehow isn't running
-      // (killed by an aggressive OEM battery manager, first run after
-      // this update, etc.), restart it rather than silently going
-      // without tracking until the next full app restart.
+      // Restart the background service if something killed it (OEM
+      // battery manager, etc.) instead of tracking staying off silently.
       _ensureBackgroundServiceRunning();
     }
   }
@@ -78,12 +72,9 @@ class _HomePageState extends ConsumerState<HomePage>
       });
     }
     if (granted) {
-      // The providers' very first call to service.start() happens as soon
-      // as this screen builds — on a fresh install, that's typically
-      // before this permission flow has resolved, so start() will have
-      // bailed out without registering the sensor listeners. Now that
-      // permission is confirmed, retry; start() is a no-op if it already
-      // succeeded.
+      // service.start() already ran once on first build, before
+      // permission was granted, so it bailed out. Retry — it's a no-op
+      // if it already succeeded.
       await service.start();
       await _ensureBackgroundServiceRunning();
     }

@@ -4,10 +4,9 @@ import 'package:sqflite/sqflite.dart';
 import '../models/daily_steps.dart';
 import '../models/hourly_steps.dart';
 
-/// Handles all local persistence of daily and hourly step records via
-/// sqflite.
+/// Local persistence for daily and hourly step records via sqflite.
 ///
-/// Table schema:
+/// Schema:
 ///   daily_steps(date TEXT PRIMARY KEY, stepCount INTEGER NOT NULL)
 ///   hourly_steps(date TEXT, hour INTEGER, stepCount INTEGER NOT NULL,
 ///                PRIMARY KEY(date, hour))
@@ -45,8 +44,8 @@ class DatabaseHelper {
         ''');
       },
       onUpgrade: (db, oldVersion, newVersion) async {
-        // Existing installs (v1) only have daily_steps — add the new
-        // hourly table without touching any existing data.
+        // v1 installs only have daily_steps — add hourly_steps without
+        // touching existing data.
         if (oldVersion < 2) {
           await db.execute('''
             CREATE TABLE hourly_steps (
@@ -102,47 +101,6 @@ class DatabaseHelper {
     return rows.map(DailySteps.fromMap).toList();
   }
 
-  /// Average steps/day over the past [days] days (missing days count as 0).
-  Future<double> averageOverPastNDays(int days) async {
-    final records = await getPastNDays(days);
-    final total = records.fold<int>(0, (sum, r) => sum + r.stepCount);
-    return total / days;
-  }
-
-  /// All records for a given calendar month (year, month 1-12).
-  Future<List<DailySteps>> getRecordsForMonth(int year, int month) async {
-    final db = await database;
-    final prefix = '${year.toString().padLeft(4, '0')}-'
-        '${month.toString().padLeft(2, '0')}-';
-    final rows = await db.query(
-      'daily_steps',
-      where: 'date LIKE ?',
-      whereArgs: ['$prefix%'],
-      orderBy: 'date ASC',
-    );
-    return rows.map(DailySteps.fromMap).toList();
-  }
-
-  /// Total steps for each month (1-12) of [year]. Months with no data
-  /// are returned as 0.
-  Future<Map<int, int>> getMonthlyTotalsForYear(int year) async {
-    final db = await database;
-    final rows = await db.rawQuery('''
-      SELECT substr(date, 6, 2) AS month, SUM(stepCount) AS total
-      FROM daily_steps
-      WHERE substr(date, 1, 4) = ?
-      GROUP BY month
-    ''', [year.toString().padLeft(4, '0')]);
-
-    final result = <int, int>{for (var m = 1; m <= 12; m++) m: 0};
-    for (final row in rows) {
-      final month = int.parse(row['month'] as String);
-      final total = (row['total'] as num).toInt();
-      result[month] = total;
-    }
-    return result;
-  }
-
   static String _formatDate(DateTime d) {
     return '${d.year.toString().padLeft(4, '0')}-'
         '${d.month.toString().padLeft(2, '0')}-'
@@ -159,10 +117,9 @@ class DatabaseHelper {
     );
   }
 
-  /// The persisted step count for one specific (date, hour), or null if
-  /// nothing's been recorded for it yet. Used by the background service to
-  /// correctly resume mid-hour after a restart, rather than losing or
-  /// double-counting that hour's steps.
+  /// Persisted step count for one (date, hour), or null if not recorded
+  /// yet. Lets the background service resume mid-hour after a restart
+  /// instead of losing or double-counting steps.
   Future<int?> getHourlyStepsForDateAndHour(String date, int hour) async {
     final db = await database;
     final rows = await db.query(

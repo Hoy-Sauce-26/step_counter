@@ -29,9 +29,9 @@ final todayStepsProvider = StreamProvider<int>((ref) {
   return service.todayStepsStream;
 });
 
-/// 'walking' / 'stopped' / 'unknown' — a faster-reacting motion signal,
-/// separate from the (batched, slower-to-update) step counter. Used only
-/// to give the UI something to show while the counter is still warming up.
+/// 'walking' / 'stopped' / 'unknown' — no UI consumer right now, but keep
+/// it running: removing it made steps arrive in laggy batches instead of
+/// individually (reason unclear, possibly Android sensor batching).
 final walkingStatusProvider = StreamProvider<String>((ref) {
   final service = ref.watch(pedometerServiceProvider);
   service.start();
@@ -83,8 +83,8 @@ class CalibrationFactorNotifier extends Notifier<double> {
   }
 }
 
-/// The user's height in cm, if they've personalized it. Null means
-/// "use the flat-rate default" — see StepMetrics.distanceKm.
+/// Height in cm, if personalized. Null uses the flat-rate default — see
+/// StepMetrics.distanceKm.
 final heightCmProvider =
     NotifierProvider<HeightCmNotifier, double?>(
   HeightCmNotifier.new,
@@ -107,8 +107,8 @@ class HeightCmNotifier extends Notifier<double?> {
   }
 }
 
-/// The user's weight in kg, if they've personalized it. Null means "use
-/// the flat-rate default" — see StepMetrics.calories.
+/// Weight in kg, if personalized. Null uses the flat-rate default — see
+/// StepMetrics.calories.
 final weightKgProvider = NotifierProvider<WeightKgNotifier, double?>(
   WeightKgNotifier.new,
 );
@@ -152,10 +152,9 @@ class UnitSystemNotifier extends Notifier<UnitSystem> {
   }
 }
 
-/// Zero-filled list of the past 7 days' records, chronological.
-/// Only re-fetches on app start and when today's step count crosses a
-/// new multiple of 100 — not on every single step — so the chart doesn't
-/// flicker/redraw constantly while someone is actively walking.
+/// Zero-filled past 7 days, chronological. Re-fetches on app start and
+/// every 100 steps (not every step) so the chart doesn't redraw
+/// constantly while walking.
 final _chartRefreshBucketProvider = Provider.autoDispose<int>((ref) {
   final steps = ref.watch(todayStepsProvider).value ?? 0;
   return steps ~/ 100;
@@ -180,10 +179,9 @@ final past7DaysProvider =
   });
 });
 
-/// Zero-filled 24-hour breakdown for a specific date (ISO-8601 string,
-/// e.g. "2026-08-11"). Refreshes on the same throttled cadence as
-/// [past7DaysProvider] when the requested date is today; historical dates
-/// are static once fetched.
+/// Zero-filled 24-hour breakdown for a date (ISO-8601, e.g. "2026-08-11").
+/// Refreshes on the same throttled cadence as [past7DaysProvider] for
+/// today; historical dates are static once fetched.
 final hourlyStepsForDateProvider =
     FutureProvider.autoDispose.family<List<HourlySteps>, String>(
   (ref, date) async {

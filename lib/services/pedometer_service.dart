@@ -87,6 +87,9 @@ class PedometerService {
 
   Future<void> setCorrectionFactor(double factor) async {
     await _prefsService.setCorrectionFactor(factor);
+    // The background service caches its own copy — without this it
+    // wouldn't pick up a recalibration until the next day or a restart.
+    FlutterBackgroundService().invoke('setCorrectionFactor', {'factor': factor});
   }
 
   Future<void> refreshNotificationWithTarget(
