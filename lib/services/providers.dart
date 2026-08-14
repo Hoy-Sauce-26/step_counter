@@ -210,8 +210,8 @@ final hourlyStepsForDateProvider =
   },
 );
 
-/// Saved routes, newest first, each with its average step count from past
-/// sessions. Invalidated after adding a route or recording a session.
+/// Saved routes, newest first, with each one's average step count.
+/// Invalidated after adding a route or recording a session.
 final routesProvider = FutureProvider<List<SavedRoute>>((ref) async {
   final db = ref.watch(databaseHelperProvider);
   return db.getRoutes();
@@ -229,10 +229,9 @@ class ActiveWalk {
   });
 }
 
-/// The walk currently being tracked, or null. Persisted so it survives an
-/// app restart, and mirrored to the background service (the source of
-/// truth for the live step count and notification) via invoke calls —
-/// same cross-isolate pattern as [CalibrationFactorNotifier].
+/// The walk currently being tracked, or null. Persisted to survive an app
+/// restart, and mirrored to the background service (the source of truth
+/// for live steps/notification) — same pattern as [CalibrationFactorNotifier].
 final activeWalkProvider = NotifierProvider<ActiveWalkNotifier, ActiveWalk?>(
   ActiveWalkNotifier.new,
 );
@@ -279,11 +278,10 @@ class ActiveWalkNotifier extends Notifier<ActiveWalk?> {
   }
 }
 
-/// Live step count for the active walk, sourced from the background
-/// service's `'walkUpdate'` broadcast. Keyed by the walk's start time so a
-/// new walk always gets a genuinely fresh subscription with no value yet —
-/// AsyncValue otherwise carries the previous walk's last-seen count across
-/// a plain `ref.invalidate`, which isn't what we want here.
+/// Live active-walk step count, from the background service's
+/// `'walkUpdate'` broadcast. Keyed by start time so a new walk gets a
+/// genuinely fresh subscription — AsyncValue otherwise carries the
+/// previous walk's count across a plain `ref.invalidate`.
 final activeWalkStepsProvider =
     StreamProvider.autoDispose.family<int, DateTime>((ref, walkStartTime) {
   final service = ref.watch(pedometerServiceProvider);

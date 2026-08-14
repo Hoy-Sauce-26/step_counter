@@ -8,11 +8,10 @@ import '../models/saved_route.dart';
 import '../services/metrics.dart';
 import '../services/providers.dart';
 
-/// Saved walking circuits: add one, start/stop tracking against it, and
-/// see a rough step estimate averaged from past sessions. Shows the live
-/// tracking/summary view instead of the list whenever a walk is active,
-/// regardless of how this page was reached — checking in mid-walk always
-/// shows progress.
+/// Saved walking circuits: add one, start/stop tracking against it, see a
+/// rough step estimate from past sessions. Shows the live tracking/summary
+/// view instead of the list whenever a walk is active, however this page
+/// was reached.
 class RoutesPage extends ConsumerWidget {
   const RoutesPage({super.key});
 
@@ -40,11 +39,9 @@ class _RoutesList extends ConsumerStatefulWidget {
 class _RoutesListState extends ConsumerState<_RoutesList> {
   final _nameController = TextEditingController();
 
-  // Ids removed optimistically on swipe. Dismissible requires the item to
-  // be gone from the very next build once onDismissed fires — the DB
-  // delete + routesProvider refetch is async, so without this the same
-  // row (same key) can briefly reappear from the stale list and Flutter
-  // throws "A dismissed Dismissible widget is still part of the tree."
+  // Ids removed optimistically on swipe — Dismissible needs the item gone
+  // by the next build, but the DB delete + refetch is async, so without
+  // this the stale list briefly re-shows the same row and Flutter throws.
   final Set<int> _pendingDeletes = {};
 
   @override
@@ -257,12 +254,9 @@ class _ActiveWalkView extends ConsumerStatefulWidget {
 class _ActiveWalkViewState extends ConsumerState<_ActiveWalkView> {
   Timer? _ticker;
 
-  // Non-null means "reviewing the Stop Walk summary". Tapping "Stop Walk"
-  // only ever sets this — it never calls activeWalkProvider, writes to the
-  // DB, or tells the background service anything, so the walk is still
-  // genuinely active underneath. "Resume" clears it back to null with no
-  // other side effect, since nothing was ever actually stopped. Only
-  // "Done" commits for real.
+  // Non-null means "reviewing the Stop Walk summary". Setting this is all
+  // "Stop Walk" does — the walk is still genuinely active underneath until
+  // "Done" commits it; "Resume" just clears this back to null.
   _WalkSnapshot? _summary;
 
   @override

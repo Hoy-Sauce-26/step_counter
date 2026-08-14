@@ -87,8 +87,8 @@ class PreferencesService {
     );
   }
 
-  // A single JSON blob rather than separate keys — these fields are
-  // correlated (one active walk, or none) and should read/clear atomically.
+  // One JSON blob, not separate keys — one active walk (or none) should
+  // read/clear atomically.
   static const _activeWalkKey = 'activeWalk';
 
   Future<void> setActiveWalk({
@@ -109,8 +109,7 @@ class PreferencesService {
     );
   }
 
-  /// {routeId, routeName, startTime, rawBaseline} or null if no walk is
-  /// active. Decoded loosely — callers are expected to know the shape.
+  /// {routeId, routeName, startTime, rawBaseline}, or null if none active.
   Future<Map<String, dynamic>?> getActiveWalk() async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_activeWalkKey);

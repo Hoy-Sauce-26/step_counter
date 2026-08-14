@@ -63,19 +63,15 @@ void onServiceStart(ServiceInstance service) async {
   int? hourStartDayTotal;
   int? lastTodaySteps;
 
-  // The most recent raw cumulative sensor value seen, updated on every
-  // event regardless of a walk. Used to seed a new walk's baseline
-  // immediately instead of waiting for the next event — seeding from the
-  // *next* event would silently absorb that event's own step(s) into
-  // "establishing zero" instead of counting them (the same off-by-one the
-  // calibration test had, from sharing this same lazy-baseline idea — see
-  // startCalibrationTest in pedometer_service.dart, fixed the same way).
+  // Latest raw sensor value, updated on every event. Seeds a new walk's
+  // baseline immediately — seeding from the *next* event instead would
+  // absorb that event's own step into "establishing zero" (see
+  // startCalibrationTest in pedometer_service.dart for the same bug/fix).
   int? lastKnownRawSteps;
 
-  // The route/walk currently being tracked, or null. Baselined against
-  // the raw cumulative sensor value (not today's already-corrected
-  // total), so a walk survives a midnight rollover without resetting,
-  // unlike an earlier prototype of this feature.
+  // The route/walk being tracked, or null. Baselined against the raw
+  // sensor value (not today's corrected total) so it survives a midnight
+  // rollover without resetting.
   Map<String, Object?>? activeWalk;
 
   final savedWalk = await prefsService.getActiveWalk();
@@ -128,8 +124,8 @@ void onServiceStart(ServiceInstance service) async {
 
   // The date check below only runs on a step event, which can be hours
   // after midnight — until then the notification shows yesterday's count.
-  // Schedule a single midnight timer instead of polling for it. Skipped
-  // while a walk is active so it doesn't stomp the walk notification.
+  // Schedule a single midnight timer instead of polling for it (skipped
+  // while a walk is active, so it doesn't stomp the walk notification).
   _scheduleMidnightNotificationReset(prefsService, () => activeWalk != null);
 
   Pedometer.stepCountStream.listen((event) async {
@@ -184,11 +180,8 @@ void onServiceStart(ServiceInstance service) async {
     // active walk — only the notification display branches.
     final walk = activeWalk;
     if (walk != null) {
-      // rawBaseline is normally already set (from lastKnownRawSteps when
-      // the walk started). Null only if a walk started before this
-      // service had ever seen a single step — fall back to the old lazy
-      // resolution for that rare case (still absorbs one step, but there's
-      // no prior reading to anchor to).
+      // rawBaseline is already set unless a walk started before this
+      // service had ever seen a step — rare fallback, still absorbs one.
       final walkBaseline = (walk['rawBaseline'] as int?) ?? event.steps;
       if (walk['rawBaseline'] == null) {
         walk['rawBaseline'] = walkBaseline;
@@ -223,8 +216,7 @@ void onServiceStart(ServiceInstance service) async {
 /// 0/target, and reschedules itself for the following midnight. Doesn't
 /// touch the sensor/baseline state — that resolves on the first real
 /// step regardless; this just stops the notification from lagging.
-/// Skipped while [isWalkActive] — a walk notification shouldn't be
-/// overwritten by the daily reset.
+/// Skipped while [isWalkActive], so it doesn't overwrite a walk notification.
 void _scheduleMidnightNotificationReset(
   PreferencesService prefsService,
   bool Function() isWalkActive,

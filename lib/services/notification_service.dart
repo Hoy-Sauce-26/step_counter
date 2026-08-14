@@ -77,9 +77,8 @@ class NotificationService {
     );
   }
 
-  /// Same notification (same id), showing live progress on an active
-  /// walk instead of the daily total. No progress bar — a walk has no
-  /// target to bound it.
+  /// Same notification, showing walk progress instead of the daily total.
+  /// No progress bar — a walk has no target.
   static Future<void> updateWalkNotification({
     required String walkName,
     required int steps,

@@ -183,8 +183,8 @@ class DatabaseHelper {
     });
   }
 
-  /// All saved routes, newest first, each with its average step count and
-  /// session count from past walks (avgSteps is null if never walked).
+  /// All saved routes, newest first, with each one's average step count
+  /// (null if never walked).
   Future<List<SavedRoute>> getRoutes() async {
     final db = await database;
     final rows = await db.rawQuery('''
@@ -222,8 +222,7 @@ class DatabaseHelper {
     });
   }
 
-  /// Deletes a route and its recorded sessions (no FK cascade is set up,
-  /// so both need clearing explicitly).
+  /// Deletes a route and its sessions (no FK cascade, so both explicitly).
   Future<void> deleteRoute(int routeId) async {
     final db = await database;
     await db.delete('walk_sessions', where: 'routeId = ?', whereArgs: [routeId]);
