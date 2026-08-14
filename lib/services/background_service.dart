@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui';
 
 import 'package:flutter_background_service/flutter_background_service.dart';
@@ -64,6 +65,14 @@ void onServiceStart(ServiceInstance service) async {
     if (factor != null) correctionFactor = factor;
   });
 
+  // The step-event-driven date check below only fires when a step actually
+  // arrives, which can be hours after midnight — until then the persistent
+  // notification would keep showing yesterday's final count. Rather than
+  // polling for that, schedule a single timer for the exact next local
+  // midnight; it resets the notification then and reschedules itself for
+  // the following midnight — one wakeup per day, not per minute.
+  _scheduleMidnightNotificationReset(prefsService);
+
   // Hourly-bucket tracking. `hourStartDayTotal` is the day's cumulative
   // total at the moment the current hour began — an hour's step count is
   // just (today's running total right now) minus that value, mirroring
@@ -129,6 +138,22 @@ void onServiceStart(ServiceInstance service) async {
 
     service.invoke('stepUpdate', {'steps': todaySteps, 'target': target});
     service.invoke('rawStep', {'raw': event.steps});
+  });
+}
+
+/// Fires once at the next local midnight, resets the persistent
+/// notification to 0/target for the new day, then reschedules itself for
+/// the following midnight. Self-contained from the sensor/baseline state
+/// above — a genuinely new day's total gets computed correctly regardless,
+/// the moment the first real step arrives; this just keeps the notification
+/// from sitting on yesterday's number in the meantime.
+void _scheduleMidnightNotificationReset(PreferencesService prefsService) {
+  final now = DateTime.now();
+  final nextMidnight = DateTime(now.year, now.month, now.day + 1);
+  Timer(nextMidnight.difference(now), () async {
+    final target = await prefsService.getDailyTarget();
+    await NotificationService.updateStepNotification(steps: 0, target: target);
+    _scheduleMidnightNotificationReset(prefsService);
   });
 }
 
