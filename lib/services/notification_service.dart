@@ -79,7 +79,4 @@ class NotificationService {
     );
   }
 
-  static Future<void> cancelNotification() async {
-    await _notificationsPlugin.cancel(id: _stepNotificationId);
-  }
 }

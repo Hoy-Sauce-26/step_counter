@@ -102,47 +102,6 @@ class DatabaseHelper {
     return rows.map(DailySteps.fromMap).toList();
   }
 
-  /// Average steps/day over the past [days] days (missing days count as 0).
-  Future<double> averageOverPastNDays(int days) async {
-    final records = await getPastNDays(days);
-    final total = records.fold<int>(0, (sum, r) => sum + r.stepCount);
-    return total / days;
-  }
-
-  /// All records for a given calendar month (year, month 1-12).
-  Future<List<DailySteps>> getRecordsForMonth(int year, int month) async {
-    final db = await database;
-    final prefix = '${year.toString().padLeft(4, '0')}-'
-        '${month.toString().padLeft(2, '0')}-';
-    final rows = await db.query(
-      'daily_steps',
-      where: 'date LIKE ?',
-      whereArgs: ['$prefix%'],
-      orderBy: 'date ASC',
-    );
-    return rows.map(DailySteps.fromMap).toList();
-  }
-
-  /// Total steps for each month (1-12) of [year]. Months with no data
-  /// are returned as 0.
-  Future<Map<int, int>> getMonthlyTotalsForYear(int year) async {
-    final db = await database;
-    final rows = await db.rawQuery('''
-      SELECT substr(date, 6, 2) AS month, SUM(stepCount) AS total
-      FROM daily_steps
-      WHERE substr(date, 1, 4) = ?
-      GROUP BY month
-    ''', [year.toString().padLeft(4, '0')]);
-
-    final result = <int, int>{for (var m = 1; m <= 12; m++) m: 0};
-    for (final row in rows) {
-      final month = int.parse(row['month'] as String);
-      final total = (row['total'] as num).toInt();
-      result[month] = total;
-    }
-    return result;
-  }
-
   static String _formatDate(DateTime d) {
     return '${d.year.toString().padLeft(4, '0')}-'
         '${d.month.toString().padLeft(2, '0')}-'

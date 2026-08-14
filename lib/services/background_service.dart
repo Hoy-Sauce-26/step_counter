@@ -56,6 +56,14 @@ void onServiceStart(ServiceInstance service) async {
   int? baseline;
   double correctionFactor = await prefsService.getCorrectionFactor();
 
+  // Lets a live recalibration (manual slider or the 100-step test) take
+  // effect on today's already-running total immediately, rather than
+  // waiting for the daily baseline refresh below to pick it up from prefs.
+  service.on('setCorrectionFactor').listen((event) {
+    final factor = (event?['factor'] as num?)?.toDouble();
+    if (factor != null) correctionFactor = factor;
+  });
+
   // Hourly-bucket tracking. `hourStartDayTotal` is the day's cumulative
   // total at the moment the current hour began — an hour's step count is
   // just (today's running total right now) minus that value, mirroring

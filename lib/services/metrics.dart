@@ -73,16 +73,5 @@ class StepMetrics {
   }
 
   static double activeMinutes(int steps) => steps / stepsPerMinute;
-
-  /// Percentage (0-100+) of [dailyTarget] reached this month, given
-  /// [totalSteps] logged so far and [daysInMonth] days in that month.
-  static double monthlyProgressPercent({
-    required int totalSteps,
-    required int dailyTarget,
-    required int daysInMonth,
-  }) {
-    if (dailyTarget <= 0 || daysInMonth <= 0) return 0;
-    return (totalSteps / (dailyTarget * daysInMonth)) * 100;
-  }
 }
 
