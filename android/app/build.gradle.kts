@@ -16,6 +16,10 @@ if (keystorePropertiesFile.exists()) {
 android {
     namespace = "com.nttech.roamfree"
     compileSdk = flutter.compileSdkVersion
+
+    buildFeatures {
+        resValues = true
+    }
 //    compileSdk = 37
     ndkVersion = flutter.ndkVersion
 
@@ -35,6 +39,7 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        resValue("string", "app_name", "Roamfree")
     }
 
     signingConfigs {
@@ -50,10 +55,11 @@ android {
 
     buildTypes {
         debug {
-            // Distinct applicationId so a `flutter run` debug build installs
-            // alongside the real com.nttech.roamfree app instead of
-            // overwriting it.
+            // Distinct applicationId and label so a `flutter run` debug
+            // build installs and displays alongside the real app instead
+            // of overwriting it.
             applicationIdSuffix = ".dev"
+            resValue("string", "app_name", "Roamfree Dev")
         }
         release {
             // Uses your real signing key if key.properties exists (i.e. on
