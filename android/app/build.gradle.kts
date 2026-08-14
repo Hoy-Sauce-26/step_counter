@@ -49,6 +49,12 @@ android {
     }
 
     buildTypes {
+        debug {
+            // Distinct applicationId so a `flutter run` debug build installs
+            // alongside the real com.nttech.roamfree app instead of
+            // overwriting it.
+            applicationIdSuffix = ".dev"
+        }
         release {
             // Uses your real signing key if key.properties exists (i.e. on
             // your machine); falls back to the debug key otherwise, so
