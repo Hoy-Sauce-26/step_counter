@@ -213,10 +213,6 @@ class _RouteRow extends StatelessWidget {
       child: Card(
         margin: const EdgeInsets.only(bottom: 8),
         child: Padding(
-          // Same Row/Padding shape as the add-route row above, so both
-          // rows' text and buttons line up on the same horizontal insets —
-          // ListTile's default contentPadding (16) didn't match this
-          // Padding's 12, so it read a few pixels out of line.
           padding: const EdgeInsets.all(12),
           child: Row(
             children: [
