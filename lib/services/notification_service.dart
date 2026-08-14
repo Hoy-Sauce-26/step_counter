@@ -77,10 +77,10 @@ class NotificationService {
     );
   }
 
-  /// Same notification, showing walk progress instead of the daily total.
-  /// No progress bar — a walk has no target.
-  static Future<void> updateWalkNotification({
-    required String walkName,
+  /// Same notification, showing route progress instead of the daily total.
+  /// No progress bar — a route has no target.
+  static Future<void> updateRouteNotification({
+    required String routeName,
     required int steps,
     required Duration elapsed,
   }) async {
@@ -104,7 +104,7 @@ class NotificationService {
 
     await _notificationsPlugin.show(
       id: _stepNotificationId,
-      title: 'Walking: $walkName',
+      title: 'On Route: $routeName',
       body: '$steps steps · ${_formatElapsed(elapsed)}',
       notificationDetails: notificationDetails,
     );

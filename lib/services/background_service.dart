@@ -63,24 +63,24 @@ void onServiceStart(ServiceInstance service) async {
   int? hourStartDayTotal;
   int? lastTodaySteps;
 
-  // Latest raw sensor value, updated on every event. Seeds a new walk's
-  // baseline immediately — seeding from the *next* event instead would
-  // absorb that event's own step into "establishing zero" (see
+  // Latest raw sensor value, updated on every event. Seeds a new route
+  // session's baseline immediately — seeding from the *next* event instead
+  // would absorb that event's own step into "establishing zero" (see
   // startCalibrationTest in pedometer_service.dart for the same bug/fix).
   int? lastKnownRawSteps;
 
-  // The route/walk being tracked, or null. Baselined against the raw
+  // The route currently being tracked, or null. Baselined against the raw
   // sensor value (not today's corrected total) so it survives a midnight
   // rollover without resetting.
-  Map<String, Object?>? activeWalk;
+  Map<String, Object?>? activeRoute;
 
-  final savedWalk = await prefsService.getActiveWalk();
-  if (savedWalk != null) {
-    activeWalk = {
-      'id': savedWalk['routeId'] as int,
-      'name': savedWalk['routeName'] as String,
-      'startTime': DateTime.parse(savedWalk['startTime'] as String),
-      'rawBaseline': savedWalk['rawBaseline'] as int?,
+  final savedRoute = await prefsService.getActiveRoute();
+  if (savedRoute != null) {
+    activeRoute = {
+      'id': savedRoute['routeId'] as int,
+      'name': savedRoute['routeName'] as String,
+      'startTime': DateTime.parse(savedRoute['startTime'] as String),
+      'rawBaseline': savedRoute['rawBaseline'] as int?,
     };
   }
 
@@ -91,18 +91,18 @@ void onServiceStart(ServiceInstance service) async {
     if (factor != null) correctionFactor = factor;
   });
 
-  service.on('startWalk').listen((event) async {
+  service.on('startRoute').listen((event) async {
     final id = event?['routeId'] as int?;
     final name = event?['routeName'] as String?;
     if (id == null || name == null) return;
     final startTime = DateTime.now();
-    activeWalk = {
+    activeRoute = {
       'id': id,
       'name': name,
       'startTime': startTime,
       'rawBaseline': lastKnownRawSteps,
     };
-    await prefsService.setActiveWalk(
+    await prefsService.setActiveRoute(
       routeId: id,
       routeName: name,
       startTime: startTime,
@@ -110,9 +110,9 @@ void onServiceStart(ServiceInstance service) async {
     );
   });
 
-  service.on('stopWalk').listen((event) async {
-    activeWalk = null;
-    await prefsService.clearActiveWalk();
+  service.on('stopRoute').listen((event) async {
+    activeRoute = null;
+    await prefsService.clearActiveRoute();
     // Revert the notification immediately rather than waiting for the
     // next step event.
     final target = await prefsService.getDailyTarget();
@@ -125,8 +125,8 @@ void onServiceStart(ServiceInstance service) async {
   // The date check below only runs on a step event, which can be hours
   // after midnight — until then the notification shows yesterday's count.
   // Schedule a single midnight timer instead of polling for it (skipped
-  // while a walk is active, so it doesn't stomp the walk notification).
-  _scheduleMidnightNotificationReset(prefsService, () => activeWalk != null);
+  // while a route is active, so it doesn't stomp the route notification).
+  _scheduleMidnightNotificationReset(prefsService, () => activeRoute != null);
 
   Pedometer.stepCountStream.listen((event) async {
     final now = DateTime.now();
@@ -177,29 +177,29 @@ void onServiceStart(ServiceInstance service) async {
     lastTodaySteps = todaySteps;
 
     // Steps always count toward the daily total above regardless of an
-    // active walk — only the notification display branches.
-    final walk = activeWalk;
-    if (walk != null) {
-      // rawBaseline is already set unless a walk started before this
+    // active route — only the notification display branches.
+    final route = activeRoute;
+    if (route != null) {
+      // rawBaseline is already set unless a route started before this
       // service had ever seen a step — rare fallback, still absorbs one.
-      final walkBaseline = (walk['rawBaseline'] as int?) ?? event.steps;
-      if (walk['rawBaseline'] == null) {
-        walk['rawBaseline'] = walkBaseline;
-        await prefsService.setActiveWalk(
-          routeId: walk['id'] as int,
-          routeName: walk['name'] as String,
-          startTime: walk['startTime'] as DateTime,
-          rawBaseline: walkBaseline,
+      final routeBaseline = (route['rawBaseline'] as int?) ?? event.steps;
+      if (route['rawBaseline'] == null) {
+        route['rawBaseline'] = routeBaseline;
+        await prefsService.setActiveRoute(
+          routeId: route['id'] as int,
+          routeName: route['name'] as String,
+          startTime: route['startTime'] as DateTime,
+          rawBaseline: routeBaseline,
         );
       }
-      final walkRawDelta = (event.steps - walkBaseline).clamp(0, 1 << 30);
-      final walkSteps = (walkRawDelta * correctionFactor).round();
-      await NotificationService.updateWalkNotification(
-        walkName: walk['name'] as String,
-        steps: walkSteps,
-        elapsed: now.difference(walk['startTime'] as DateTime),
+      final routeRawDelta = (event.steps - routeBaseline).clamp(0, 1 << 30);
+      final routeSteps = (routeRawDelta * correctionFactor).round();
+      await NotificationService.updateRouteNotification(
+        routeName: route['name'] as String,
+        steps: routeSteps,
+        elapsed: now.difference(route['startTime'] as DateTime),
       );
-      service.invoke('walkUpdate', {'steps': walkSteps});
+      service.invoke('routeUpdate', {'steps': routeSteps});
     } else {
       await NotificationService.updateStepNotification(
         steps: todaySteps,
@@ -216,19 +216,19 @@ void onServiceStart(ServiceInstance service) async {
 /// 0/target, and reschedules itself for the following midnight. Doesn't
 /// touch the sensor/baseline state — that resolves on the first real
 /// step regardless; this just stops the notification from lagging.
-/// Skipped while [isWalkActive], so it doesn't overwrite a walk notification.
+/// Skipped while [isRouteActive], so it doesn't overwrite a route notification.
 void _scheduleMidnightNotificationReset(
   PreferencesService prefsService,
-  bool Function() isWalkActive,
+  bool Function() isRouteActive,
 ) {
   final now = DateTime.now();
   final nextMidnight = DateTime(now.year, now.month, now.day + 1);
   Timer(nextMidnight.difference(now), () async {
-    if (!isWalkActive()) {
+    if (!isRouteActive()) {
       final target = await prefsService.getDailyTarget();
       await NotificationService.updateStepNotification(steps: 0, target: target);
     }
-    _scheduleMidnightNotificationReset(prefsService, isWalkActive);
+    _scheduleMidnightNotificationReset(prefsService, isRouteActive);
   });
 }
 

@@ -13,8 +13,8 @@ import '../models/saved_route.dart';
 ///   hourly_steps(date TEXT, hour INTEGER, stepCount INTEGER NOT NULL,
 ///                PRIMARY KEY(date, hour))
 ///   routes(id INTEGER PRIMARY KEY, name TEXT NOT NULL, createdAt TEXT)
-///   walk_sessions(id INTEGER PRIMARY KEY, routeId INTEGER, date TEXT,
-///                 steps INTEGER, durationSeconds INTEGER)
+///   route_sessions(id INTEGER PRIMARY KEY, routeId INTEGER, date TEXT,
+///                  steps INTEGER, durationSeconds INTEGER)
 class DatabaseHelper {
   DatabaseHelper._internal();
   static final DatabaseHelper instance = DatabaseHelper._internal();
@@ -31,7 +31,7 @@ class DatabaseHelper {
     final path = p.join(dbPath, 'step_counter.db');
     return openDatabase(
       path,
-      version: 3,
+      version: 4,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE daily_steps (
@@ -64,6 +64,10 @@ class DatabaseHelper {
         }
         if (oldVersion < 3) {
           await _createRouteTables(db);
+        } else if (oldVersion < 4) {
+          // v3 already has routes/sessions, just under the sessions
+          // table's old name.
+          await db.execute('ALTER TABLE walk_sessions RENAME TO route_sessions');
         }
       },
     );
@@ -78,7 +82,7 @@ class DatabaseHelper {
       )
     ''');
     await db.execute('''
-      CREATE TABLE walk_sessions (
+      CREATE TABLE route_sessions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         routeId INTEGER NOT NULL,
         date TEXT NOT NULL,
@@ -184,7 +188,7 @@ class DatabaseHelper {
   }
 
   /// All saved routes, newest first, with each one's average step count
-  /// (null if never walked).
+  /// (null if no sessions yet).
   Future<List<SavedRoute>> getRoutes() async {
     final db = await database;
     final rows = await db.rawQuery('''
@@ -192,7 +196,7 @@ class DatabaseHelper {
              AVG(s.steps) AS avgSteps,
              COUNT(s.id) AS sessionCount
       FROM routes r
-      LEFT JOIN walk_sessions s ON s.routeId = r.id
+      LEFT JOIN route_sessions s ON s.routeId = r.id
       GROUP BY r.id
       ORDER BY r.createdAt DESC
     ''');
@@ -206,15 +210,15 @@ class DatabaseHelper {
         .toList();
   }
 
-  /// Records one completed walk of a route.
-  Future<void> insertWalkSession({
+  /// Records one completed session of a route.
+  Future<void> insertRouteSession({
     required int routeId,
     required String date,
     required int steps,
     required int durationSeconds,
   }) async {
     final db = await database;
-    await db.insert('walk_sessions', {
+    await db.insert('route_sessions', {
       'routeId': routeId,
       'date': date,
       'steps': steps,
@@ -225,7 +229,7 @@ class DatabaseHelper {
   /// Deletes a route and its sessions (no FK cascade, so both explicitly).
   Future<void> deleteRoute(int routeId) async {
     final db = await database;
-    await db.delete('walk_sessions', where: 'routeId = ?', whereArgs: [routeId]);
+    await db.delete('route_sessions', where: 'routeId = ?', whereArgs: [routeId]);
     await db.delete('routes', where: 'id = ?', whereArgs: [routeId]);
   }
 }

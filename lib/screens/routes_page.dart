@@ -8,22 +8,22 @@ import '../models/saved_route.dart';
 import '../services/metrics.dart';
 import '../services/providers.dart';
 
-/// Saved walking circuits: add one, start/stop tracking against it, see a
-/// rough step estimate from past sessions. Shows the live tracking/summary
-/// view instead of the list whenever a walk is active, however this page
-/// was reached.
+/// Saved routes: add one, start/stop tracking against it, see a rough step
+/// estimate from past sessions. Shows the live tracking/summary view
+/// instead of the list whenever a route is active, however this page was
+/// reached.
 class RoutesPage extends ConsumerWidget {
   const RoutesPage({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final activeWalk = ref.watch(activeWalkProvider);
+    final activeRoute = ref.watch(activeRouteProvider);
     return Scaffold(
       appBar: AppBar(title: const Text('My Routes')),
       body: SafeArea(
-        child: activeWalk == null
+        child: activeRoute == null
             ? const _RoutesList()
-            : _ActiveWalkView(activeWalk: activeWalk),
+            : _ActiveRouteView(activeRoute: activeRoute),
       ),
     );
   }
@@ -57,13 +57,13 @@ class _RoutesListState extends ConsumerState<_RoutesList> {
     final id = await db.insertRoute(name);
     ref.invalidate(routesProvider);
     _nameController.clear();
-    await ref.read(activeWalkProvider.notifier).startWalk(id, name);
+    await ref.read(activeRouteProvider.notifier).startRoute(id, name);
   }
 
   Future<void> _start(SavedRoute route) async {
     await ref
-        .read(activeWalkProvider.notifier)
-        .startWalk(route.id, route.name);
+        .read(activeRouteProvider.notifier)
+        .startRoute(route.id, route.name);
   }
 
   Future<void> _delete(SavedRoute route) async {
@@ -101,7 +101,7 @@ class _RoutesListState extends ConsumerState<_RoutesList> {
                   valueListenable: _nameController,
                   builder: (context, value, _) => FilledButton.icon(
                     icon: const Icon(Icons.play_arrow),
-                    label: const Text('Start Walk'),
+                    label: const Text('Start Route'),
                     onPressed:
                         value.text.trim().isEmpty ? null : _addAndStart,
                   ),
@@ -169,8 +169,8 @@ class _RouteRow extends StatelessWidget {
       builder: (context) => AlertDialog(
         title: const Text('Delete route?'),
         content: Text(
-          'This removes "${route.name}" and its walk history. This can\'t '
-          'be undone.',
+          'This removes "${route.name}" and its history. This can\'t be '
+          'undone.',
         ),
         actions: [
           TextButton(
@@ -190,7 +190,7 @@ class _RouteRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final estimate = route.avgSteps == null
-        ? 'Not yet walked'
+        ? 'Not yet completed'
         : '~${NumberFormat.decimalPattern().format(route.avgSteps!.round())} steps';
     return Dismissible(
       key: ValueKey(route.id),
@@ -217,7 +217,7 @@ class _RouteRow extends StatelessWidget {
           subtitle: Text(estimate),
           trailing: FilledButton.tonalIcon(
             icon: const Icon(Icons.play_arrow),
-            label: const Text('Start Walk'),
+            label: const Text('Start Route'),
             onPressed: onStart,
           ),
         ),
@@ -226,15 +226,15 @@ class _RouteRow extends StatelessWidget {
   }
 }
 
-/// Frozen stats shown while reviewing the "Stop Walk" summary. Only ever
-/// held in local widget state — see [_ActiveWalkViewState].
-class _WalkSnapshot {
+/// Frozen stats shown while reviewing the "Stop Route" summary. Only ever
+/// held in local widget state — see [_ActiveRouteViewState].
+class _RouteSnapshot {
   final int steps;
   final Duration elapsed;
   final DistanceResult distance;
   final double calories;
 
-  const _WalkSnapshot({
+  const _RouteSnapshot({
     required this.steps,
     required this.elapsed,
     required this.distance,
@@ -242,22 +242,22 @@ class _WalkSnapshot {
   });
 }
 
-class _ActiveWalkView extends ConsumerStatefulWidget {
-  final ActiveWalk activeWalk;
+class _ActiveRouteView extends ConsumerStatefulWidget {
+  final ActiveRoute activeRoute;
 
-  const _ActiveWalkView({required this.activeWalk});
+  const _ActiveRouteView({required this.activeRoute});
 
   @override
-  ConsumerState<_ActiveWalkView> createState() => _ActiveWalkViewState();
+  ConsumerState<_ActiveRouteView> createState() => _ActiveRouteViewState();
 }
 
-class _ActiveWalkViewState extends ConsumerState<_ActiveWalkView> {
+class _ActiveRouteViewState extends ConsumerState<_ActiveRouteView> {
   Timer? _ticker;
 
-  // Non-null means "reviewing the Stop Walk summary". Setting this is all
-  // "Stop Walk" does — the walk is still genuinely active underneath until
-  // "Done" commits it; "Resume" just clears this back to null.
-  _WalkSnapshot? _summary;
+  // Non-null means "reviewing the Stop Route summary". Setting this is all
+  // "Stop Route" does — the route is still genuinely active underneath
+  // until "Done" commits it; "Resume" just clears this back to null.
+  _RouteSnapshot? _summary;
 
   @override
   void initState() {
@@ -282,7 +282,7 @@ class _ActiveWalkViewState extends ConsumerState<_ActiveWalkView> {
     UnitSystem unitSystem,
   ) {
     setState(() {
-      _summary = _WalkSnapshot(
+      _summary = _RouteSnapshot(
         steps: steps,
         elapsed: elapsed,
         distance: StepMetrics.distance(steps, heightCm: heightCm, unit: unitSystem),
@@ -299,14 +299,14 @@ class _ActiveWalkViewState extends ConsumerState<_ActiveWalkView> {
     final summary = _summary;
     if (summary == null) return;
     final db = ref.read(databaseHelperProvider);
-    await db.insertWalkSession(
-      routeId: widget.activeWalk.routeId,
+    await db.insertRouteSession(
+      routeId: widget.activeRoute.routeId,
       date: _todayString(),
       steps: summary.steps,
       durationSeconds: summary.elapsed.inSeconds,
     );
     ref.invalidate(routesProvider);
-    await ref.read(activeWalkProvider.notifier).stopWalk();
+    await ref.read(activeRouteProvider.notifier).stopRoute();
   }
 
   String _todayString() {
@@ -332,9 +332,10 @@ class _ActiveWalkViewState extends ConsumerState<_ActiveWalkView> {
     final weightKg = ref.watch(weightKgProvider);
     final unitSystem = ref.watch(unitSystemProvider);
     final liveSteps =
-        ref.watch(activeWalkStepsProvider(widget.activeWalk.startTime)).value ??
+        ref.watch(activeRouteStepsProvider(widget.activeRoute.startTime)).value ??
             0;
-    final liveElapsed = DateTime.now().difference(widget.activeWalk.startTime);
+    final liveElapsed =
+        DateTime.now().difference(widget.activeRoute.startTime);
 
     final summary = _summary;
     final steps = summary?.steps ?? liveSteps;
@@ -350,7 +351,7 @@ class _ActiveWalkViewState extends ConsumerState<_ActiveWalkView> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(widget.activeWalk.routeName, style: theme.textTheme.titleLarge),
+            Text(widget.activeRoute.routeName, style: theme.textTheme.titleLarge),
             const SizedBox(height: 16),
             Text(
               '$steps',
@@ -379,7 +380,7 @@ class _ActiveWalkViewState extends ConsumerState<_ActiveWalkView> {
             if (summary == null)
               FilledButton.icon(
                 icon: const Icon(Icons.stop_circle_outlined),
-                label: const Text('Stop Walk'),
+                label: const Text('Stop Route'),
                 onPressed: () => _stopAndReview(
                   steps,
                   elapsed,

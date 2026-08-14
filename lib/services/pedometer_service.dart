@@ -13,11 +13,11 @@ class PedometerService {
   StreamSubscription<PedestrianStatus>? _statusSubscription;
   StreamSubscription<dynamic>? _bgStepSubscription;
   StreamSubscription<dynamic>? _bgRawSubscription;
-  StreamSubscription<dynamic>? _bgWalkSubscription;
+  StreamSubscription<dynamic>? _bgRouteSubscription;
   final _controller = StreamController<int>.broadcast();
   final _statusController = StreamController<String>.broadcast();
   final _rawCumulativeController = StreamController<int>.broadcast();
-  final _walkStepsController = StreamController<int>.broadcast();
+  final _routeStepsController = StreamController<int>.broadcast();
   final _dbHelper = DatabaseHelper.instance;
   final _prefsService = PreferencesService();
 
@@ -28,9 +28,9 @@ class PedometerService {
 
   Stream<String> get walkingStatusStream => _statusController.stream;
 
-  /// Live active-walk step count, relayed from the background service's
-  /// `'walkUpdate'` broadcast.
-  Stream<int> get activeWalkStepsStream => _walkStepsController.stream;
+  /// Live active-route step count, relayed from the background service's
+  /// `'routeUpdate'` broadcast.
+  Stream<int> get activeRouteStepsStream => _routeStepsController.stream;
 
   Future<bool> requestPermission() async {
     final status = await Permission.activityRecognition.request();
@@ -74,10 +74,10 @@ class PedometerService {
       _rawCumulativeController.add(raw);
     });
 
-    _bgWalkSubscription = service.on('walkUpdate').listen((event) {
+    _bgRouteSubscription = service.on('routeUpdate').listen((event) {
       if (event == null) return;
       final steps = event['steps'] as int? ?? 0;
-      _walkStepsController.add(steps);
+      _routeStepsController.add(steps);
     });
 
     _statusSubscription = Pedometer.pedestrianStatusStream.listen(
@@ -121,8 +121,8 @@ class PedometerService {
     _bgStepSubscription = null;
     _bgRawSubscription?.cancel();
     _bgRawSubscription = null;
-    _bgWalkSubscription?.cancel();
-    _bgWalkSubscription = null;
+    _bgRouteSubscription?.cancel();
+    _bgRouteSubscription = null;
     _statusSubscription?.cancel();
     _statusSubscription = null;
   }
@@ -132,7 +132,7 @@ class PedometerService {
     _controller.close();
     _statusController.close();
     _rawCumulativeController.close();
-    _walkStepsController.close();
+    _routeStepsController.close();
   }
 
   StreamSubscription<int> startCalibrationTest(

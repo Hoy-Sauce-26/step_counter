@@ -87,11 +87,11 @@ class PreferencesService {
     );
   }
 
-  // One JSON blob, not separate keys — one active walk (or none) should
+  // One JSON blob, not separate keys — one active route (or none) should
   // read/clear atomically.
-  static const _activeWalkKey = 'activeWalk';
+  static const _activeRouteKey = 'activeRoute';
 
-  Future<void> setActiveWalk({
+  Future<void> setActiveRoute({
     required int routeId,
     required String routeName,
     required DateTime startTime,
@@ -99,7 +99,7 @@ class PreferencesService {
   }) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(
-      _activeWalkKey,
+      _activeRouteKey,
       jsonEncode({
         'routeId': routeId,
         'routeName': routeName,
@@ -110,15 +110,15 @@ class PreferencesService {
   }
 
   /// {routeId, routeName, startTime, rawBaseline}, or null if none active.
-  Future<Map<String, dynamic>?> getActiveWalk() async {
+  Future<Map<String, dynamic>?> getActiveRoute() async {
     final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_activeWalkKey);
+    final raw = prefs.getString(_activeRouteKey);
     if (raw == null) return null;
     return jsonDecode(raw) as Map<String, dynamic>;
   }
 
-  Future<void> clearActiveWalk() async {
+  Future<void> clearActiveRoute() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_activeWalkKey);
+    await prefs.remove(_activeRouteKey);
   }
 }

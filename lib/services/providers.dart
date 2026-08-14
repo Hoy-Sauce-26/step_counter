@@ -217,73 +217,74 @@ final routesProvider = FutureProvider<List<SavedRoute>>((ref) async {
   return db.getRoutes();
 });
 
-/// Marks a currently in-progress walk against a saved route.
-class ActiveWalk {
+/// Marks a route currently in progress.
+class ActiveRoute {
   final int routeId;
   final String routeName;
   final DateTime startTime;
-  const ActiveWalk({
+  const ActiveRoute({
     required this.routeId,
     required this.routeName,
     required this.startTime,
   });
 }
 
-/// The walk currently being tracked, or null. Persisted to survive an app
+/// The route currently being tracked, or null. Persisted to survive an app
 /// restart, and mirrored to the background service (the source of truth
 /// for live steps/notification) — same pattern as [CalibrationFactorNotifier].
-final activeWalkProvider = NotifierProvider<ActiveWalkNotifier, ActiveWalk?>(
-  ActiveWalkNotifier.new,
+final activeRouteProvider =
+    NotifierProvider<ActiveRouteNotifier, ActiveRoute?>(
+  ActiveRouteNotifier.new,
 );
 
-class ActiveWalkNotifier extends Notifier<ActiveWalk?> {
+class ActiveRouteNotifier extends Notifier<ActiveRoute?> {
   @override
-  ActiveWalk? build() {
+  ActiveRoute? build() {
     _load();
     return null;
   }
 
   Future<void> _load() async {
-    final saved = await ref.read(preferencesServiceProvider).getActiveWalk();
+    final saved = await ref.read(preferencesServiceProvider).getActiveRoute();
     if (saved == null) return;
-    state = ActiveWalk(
+    state = ActiveRoute(
       routeId: saved['routeId'] as int,
       routeName: saved['routeName'] as String,
       startTime: DateTime.parse(saved['startTime'] as String),
     );
   }
 
-  Future<void> startWalk(int routeId, String routeName) async {
+  Future<void> startRoute(int routeId, String routeName) async {
     final startTime = DateTime.now();
-    state = ActiveWalk(
+    state = ActiveRoute(
       routeId: routeId,
       routeName: routeName,
       startTime: startTime,
     );
-    await ref.read(preferencesServiceProvider).setActiveWalk(
+    await ref.read(preferencesServiceProvider).setActiveRoute(
           routeId: routeId,
           routeName: routeName,
           startTime: startTime,
         );
-    FlutterBackgroundService().invoke('startWalk', {
+    FlutterBackgroundService().invoke('startRoute', {
       'routeId': routeId,
       'routeName': routeName,
     });
   }
 
-  Future<void> stopWalk() async {
+  Future<void> stopRoute() async {
     state = null;
-    await ref.read(preferencesServiceProvider).clearActiveWalk();
-    FlutterBackgroundService().invoke('stopWalk');
+    await ref.read(preferencesServiceProvider).clearActiveRoute();
+    FlutterBackgroundService().invoke('stopRoute');
   }
 }
 
-/// Live active-walk step count, from the background service's
-/// `'walkUpdate'` broadcast. Keyed by start time so a new walk gets a
-/// genuinely fresh subscription — AsyncValue otherwise carries the
-/// previous walk's count across a plain `ref.invalidate`.
-final activeWalkStepsProvider =
-    StreamProvider.autoDispose.family<int, DateTime>((ref, walkStartTime) {
+/// Live active-route step count, from the background service's
+/// `'routeUpdate'` broadcast. Keyed by start time so a new route session
+/// gets a genuinely fresh subscription — AsyncValue otherwise carries the
+/// previous session's count across a plain `ref.invalidate`.
+final activeRouteStepsProvider =
+    StreamProvider.autoDispose.family<int, DateTime>((ref, routeStartTime) {
   final service = ref.watch(pedometerServiceProvider);
-  return service.activeWalkStepsStream;
+  return service.activeRouteStepsStream;
 });
