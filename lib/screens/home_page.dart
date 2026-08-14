@@ -11,6 +11,7 @@ import '../widgets/hourly_breakdown_dialog.dart';
 import '../widgets/metric_card.dart';
 import '../widgets/personalize_dialog.dart';
 import '../widgets/step_progress_ring.dart';
+import 'routes_page.dart';
 
 class HomePage extends ConsumerStatefulWidget {
   const HomePage({super.key});
@@ -142,6 +143,15 @@ class _HomePageState extends ConsumerState<HomePage>
               if (newTarget != null) {
                 ref.read(dailyTargetProvider.notifier).setTarget(newTarget);
               }
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.route),
+            tooltip: 'My Routes',
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (context) => const RoutesPage()),
+              );
             },
           ),
         ],

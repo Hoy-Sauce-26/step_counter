@@ -76,4 +76,47 @@ class NotificationService {
       notificationDetails: notificationDetails,
     );
   }
+
+  /// Same notification (same id), showing live progress on an active
+  /// walk instead of the daily total. No progress bar — a walk has no
+  /// target to bound it.
+  static Future<void> updateWalkNotification({
+    required String walkName,
+    required int steps,
+    required Duration elapsed,
+  }) async {
+    final androidDetails = AndroidNotificationDetails(
+      'step_counter_channel',
+      'Step Counter Updates',
+      channelDescription: 'Ongoing daily step counter notification',
+      importance: Importance.low,
+      priority: Priority.low,
+      ongoing: true,
+      autoCancel: false,
+      onlyAlertOnce: true,
+      playSound: false,
+      icon: '@mipmap/ic_launcher',
+    );
+
+    final notificationDetails = NotificationDetails(
+      android: androidDetails,
+      iOS: const DarwinNotificationDetails(),
+    );
+
+    await _notificationsPlugin.show(
+      id: _stepNotificationId,
+      title: 'Walking: $walkName',
+      body: '$steps steps · ${_formatElapsed(elapsed)}',
+      notificationDetails: notificationDetails,
+    );
+  }
+
+  static String _formatElapsed(Duration d) {
+    final h = d.inHours;
+    final m = d.inMinutes % 60;
+    final s = d.inSeconds % 60;
+    final mStr = m.toString().padLeft(2, '0');
+    final sStr = s.toString().padLeft(2, '0');
+    return h > 0 ? '${h}h ${mStr}m ${sStr}s' : '${m}m ${sStr}s';
+  }
 }

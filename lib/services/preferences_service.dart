@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'metrics.dart';
@@ -83,5 +85,41 @@ class PreferencesService {
       _unitSystemKey,
       system == UnitSystem.imperial ? 'imperial' : 'metric',
     );
+  }
+
+  // A single JSON blob rather than separate keys — these fields are
+  // correlated (one active walk, or none) and should read/clear atomically.
+  static const _activeWalkKey = 'activeWalk';
+
+  Future<void> setActiveWalk({
+    required int routeId,
+    required String routeName,
+    required DateTime startTime,
+    int? rawBaseline,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      _activeWalkKey,
+      jsonEncode({
+        'routeId': routeId,
+        'routeName': routeName,
+        'startTime': startTime.toIso8601String(),
+        'rawBaseline': rawBaseline,
+      }),
+    );
+  }
+
+  /// {routeId, routeName, startTime, rawBaseline} or null if no walk is
+  /// active. Decoded loosely — callers are expected to know the shape.
+  Future<Map<String, dynamic>?> getActiveWalk() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_activeWalkKey);
+    if (raw == null) return null;
+    return jsonDecode(raw) as Map<String, dynamic>;
+  }
+
+  Future<void> clearActiveWalk() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_activeWalkKey);
   }
 }

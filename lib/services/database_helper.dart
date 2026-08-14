@@ -3,13 +3,18 @@ import 'package:sqflite/sqflite.dart';
 
 import '../models/daily_steps.dart';
 import '../models/hourly_steps.dart';
+import '../models/saved_route.dart';
 
-/// Local persistence for daily and hourly step records via sqflite.
+/// Local persistence for daily/hourly step records and saved routes, via
+/// sqflite.
 ///
 /// Schema:
 ///   daily_steps(date TEXT PRIMARY KEY, stepCount INTEGER NOT NULL)
 ///   hourly_steps(date TEXT, hour INTEGER, stepCount INTEGER NOT NULL,
 ///                PRIMARY KEY(date, hour))
+///   routes(id INTEGER PRIMARY KEY, name TEXT NOT NULL, createdAt TEXT)
+///   walk_sessions(id INTEGER PRIMARY KEY, routeId INTEGER, date TEXT,
+///                 steps INTEGER, durationSeconds INTEGER)
 class DatabaseHelper {
   DatabaseHelper._internal();
   static final DatabaseHelper instance = DatabaseHelper._internal();
@@ -26,7 +31,7 @@ class DatabaseHelper {
     final path = p.join(dbPath, 'step_counter.db');
     return openDatabase(
       path,
-      version: 2,
+      version: 3,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE daily_steps (
@@ -42,6 +47,7 @@ class DatabaseHelper {
             PRIMARY KEY (date, hour)
           )
         ''');
+        await _createRouteTables(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         // v1 installs only have daily_steps — add hourly_steps without
@@ -56,8 +62,30 @@ class DatabaseHelper {
             )
           ''');
         }
+        if (oldVersion < 3) {
+          await _createRouteTables(db);
+        }
       },
     );
+  }
+
+  Future<void> _createRouteTables(Database db) async {
+    await db.execute('''
+      CREATE TABLE routes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        createdAt TEXT NOT NULL
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE walk_sessions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        routeId INTEGER NOT NULL,
+        date TEXT NOT NULL,
+        steps INTEGER NOT NULL,
+        durationSeconds INTEGER NOT NULL
+      )
+    ''');
   }
 
   /// Insert today's count, or update it if a record for that date exists.
@@ -144,5 +172,61 @@ class DatabaseHelper {
       orderBy: 'hour ASC',
     );
     return rows.map(HourlySteps.fromMap).toList();
+  }
+
+  /// Saves a new route and returns its id.
+  Future<int> insertRoute(String name) async {
+    final db = await database;
+    return db.insert('routes', {
+      'name': name,
+      'createdAt': DateTime.now().toIso8601String(),
+    });
+  }
+
+  /// All saved routes, newest first, each with its average step count and
+  /// session count from past walks (avgSteps is null if never walked).
+  Future<List<SavedRoute>> getRoutes() async {
+    final db = await database;
+    final rows = await db.rawQuery('''
+      SELECT r.id, r.name,
+             AVG(s.steps) AS avgSteps,
+             COUNT(s.id) AS sessionCount
+      FROM routes r
+      LEFT JOIN walk_sessions s ON s.routeId = r.id
+      GROUP BY r.id
+      ORDER BY r.createdAt DESC
+    ''');
+    return rows
+        .map((row) => SavedRoute(
+              id: row['id'] as int,
+              name: row['name'] as String,
+              avgSteps: (row['avgSteps'] as num?)?.toDouble(),
+              sessionCount: (row['sessionCount'] as num).toInt(),
+            ))
+        .toList();
+  }
+
+  /// Records one completed walk of a route.
+  Future<void> insertWalkSession({
+    required int routeId,
+    required String date,
+    required int steps,
+    required int durationSeconds,
+  }) async {
+    final db = await database;
+    await db.insert('walk_sessions', {
+      'routeId': routeId,
+      'date': date,
+      'steps': steps,
+      'durationSeconds': durationSeconds,
+    });
+  }
+
+  /// Deletes a route and its recorded sessions (no FK cascade is set up,
+  /// so both need clearing explicitly).
+  Future<void> deleteRoute(int routeId) async {
+    final db = await database;
+    await db.delete('walk_sessions', where: 'routeId = ?', whereArgs: [routeId]);
+    await db.delete('routes', where: 'id = ?', whereArgs: [routeId]);
   }
 }
