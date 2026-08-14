@@ -1,7 +1,9 @@
+import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/daily_steps.dart';
 import '../models/hourly_steps.dart';
+import '../models/saved_route.dart';
 import 'database_helper.dart';
 import 'metrics.dart';
 import 'pedometer_service.dart';
@@ -207,3 +209,82 @@ final hourlyStepsForDateProvider =
     );
   },
 );
+
+/// Saved routes, newest first, with each one's average step count.
+/// Invalidated after adding a route or recording a session.
+final routesProvider = FutureProvider<List<SavedRoute>>((ref) async {
+  final db = ref.watch(databaseHelperProvider);
+  return db.getRoutes();
+});
+
+/// Marks a route currently in progress.
+class ActiveRoute {
+  final int routeId;
+  final String routeName;
+  final DateTime startTime;
+  const ActiveRoute({
+    required this.routeId,
+    required this.routeName,
+    required this.startTime,
+  });
+}
+
+/// The route currently being tracked, or null. Persisted to survive an app
+/// restart, and mirrored to the background service (the source of truth
+/// for live steps/notification) — same pattern as [CalibrationFactorNotifier].
+final activeRouteProvider =
+    NotifierProvider<ActiveRouteNotifier, ActiveRoute?>(
+  ActiveRouteNotifier.new,
+);
+
+class ActiveRouteNotifier extends Notifier<ActiveRoute?> {
+  @override
+  ActiveRoute? build() {
+    _load();
+    return null;
+  }
+
+  Future<void> _load() async {
+    final saved = await ref.read(preferencesServiceProvider).getActiveRoute();
+    if (saved == null) return;
+    state = ActiveRoute(
+      routeId: saved['routeId'] as int,
+      routeName: saved['routeName'] as String,
+      startTime: DateTime.parse(saved['startTime'] as String),
+    );
+  }
+
+  Future<void> startRoute(int routeId, String routeName) async {
+    final startTime = DateTime.now();
+    state = ActiveRoute(
+      routeId: routeId,
+      routeName: routeName,
+      startTime: startTime,
+    );
+    await ref.read(preferencesServiceProvider).setActiveRoute(
+          routeId: routeId,
+          routeName: routeName,
+          startTime: startTime,
+        );
+    FlutterBackgroundService().invoke('startRoute', {
+      'routeId': routeId,
+      'routeName': routeName,
+    });
+  }
+
+  Future<void> stopRoute() async {
+    state = null;
+    await ref.read(preferencesServiceProvider).clearActiveRoute();
+    FlutterBackgroundService().invoke('stopRoute');
+  }
+}
+
+/// Live active-route step count, from the background service's
+/// `'routeUpdate'` broadcast. Keyed by start time so a new route session
+/// gets a genuinely fresh subscription — AsyncValue otherwise carries the
+/// previous session's count across a plain `ref.invalidate`.
+final activeRouteStepsProvider =
+    StreamProvider.autoDispose.family<int, DateTime>((ref, routeStartTime) {
+  final service = ref.watch(pedometerServiceProvider);
+  return service.activeRouteStepsStream;
+});

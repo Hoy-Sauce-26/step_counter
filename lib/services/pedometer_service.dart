@@ -13,17 +13,24 @@ class PedometerService {
   StreamSubscription<PedestrianStatus>? _statusSubscription;
   StreamSubscription<dynamic>? _bgStepSubscription;
   StreamSubscription<dynamic>? _bgRawSubscription;
+  StreamSubscription<dynamic>? _bgRouteSubscription;
   final _controller = StreamController<int>.broadcast();
   final _statusController = StreamController<String>.broadcast();
   final _rawCumulativeController = StreamController<int>.broadcast();
+  final _routeStepsController = StreamController<int>.broadcast();
   final _dbHelper = DatabaseHelper.instance;
   final _prefsService = PreferencesService();
 
   bool _starting = false;
+  int? _lastKnownRawSteps;
 
   Stream<int> get todayStepsStream => _controller.stream;
 
   Stream<String> get walkingStatusStream => _statusController.stream;
+
+  /// Live active-route step count, relayed from the background service's
+  /// `'routeUpdate'` broadcast.
+  Stream<int> get activeRouteStepsStream => _routeStepsController.stream;
 
   Future<bool> requestPermission() async {
     final status = await Permission.activityRecognition.request();
@@ -63,7 +70,14 @@ class PedometerService {
     _bgRawSubscription = service.on('rawStep').listen((event) {
       if (event == null) return;
       final raw = event['raw'] as int? ?? 0;
+      _lastKnownRawSteps = raw;
       _rawCumulativeController.add(raw);
+    });
+
+    _bgRouteSubscription = service.on('routeUpdate').listen((event) {
+      if (event == null) return;
+      final steps = event['steps'] as int? ?? 0;
+      _routeStepsController.add(steps);
     });
 
     _statusSubscription = Pedometer.pedestrianStatusStream.listen(
@@ -107,6 +121,8 @@ class PedometerService {
     _bgStepSubscription = null;
     _bgRawSubscription?.cancel();
     _bgRawSubscription = null;
+    _bgRouteSubscription?.cancel();
+    _bgRouteSubscription = null;
     _statusSubscription?.cancel();
     _statusSubscription = null;
   }
@@ -116,12 +132,16 @@ class PedometerService {
     _controller.close();
     _statusController.close();
     _rawCumulativeController.close();
+    _routeStepsController.close();
   }
 
   StreamSubscription<int> startCalibrationTest(
     void Function(int rawSteps) onUpdate,
   ) {
-    int? testBaseline;
+    // Seed from the last known reading — waiting for the next event to
+    // define the baseline would absorb that event's own step, undercounting
+    // by one. Falls back to that lazy behavior only if nothing's arrived yet.
+    int? testBaseline = _lastKnownRawSteps;
     return _rawCumulativeController.stream.listen((rawCumulative) {
       testBaseline ??= rawCumulative;
       onUpdate((rawCumulative - testBaseline!).clamp(0, 1 << 30));

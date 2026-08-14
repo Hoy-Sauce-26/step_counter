@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'metrics.dart';
@@ -83,5 +85,40 @@ class PreferencesService {
       _unitSystemKey,
       system == UnitSystem.imperial ? 'imperial' : 'metric',
     );
+  }
+
+  // One JSON blob, not separate keys — one active route (or none) should
+  // read/clear atomically.
+  static const _activeRouteKey = 'activeRoute';
+
+  Future<void> setActiveRoute({
+    required int routeId,
+    required String routeName,
+    required DateTime startTime,
+    int? rawBaseline,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      _activeRouteKey,
+      jsonEncode({
+        'routeId': routeId,
+        'routeName': routeName,
+        'startTime': startTime.toIso8601String(),
+        'rawBaseline': rawBaseline,
+      }),
+    );
+  }
+
+  /// {routeId, routeName, startTime, rawBaseline}, or null if none active.
+  Future<Map<String, dynamic>?> getActiveRoute() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_activeRouteKey);
+    if (raw == null) return null;
+    return jsonDecode(raw) as Map<String, dynamic>;
+  }
+
+  Future<void> clearActiveRoute() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_activeRouteKey);
   }
 }
