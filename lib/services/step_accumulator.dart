@@ -80,7 +80,9 @@ class StepAccumulator {
 
     if (_trackedDate != date || sensorReset) {
       _trackedDate = date;
-      // Loaded before the baseline
+      // Loaded before the baseline, not after: the baseline is reconstructed
+      // from the stored daily total, which includes manual credits, and those
+      // have to come back out before that arithmetic means anything.
       _manualSteps = await _store.readManualSteps(date);
 
       final storedTotal = await _store.readDailySteps(date) ?? 0;
