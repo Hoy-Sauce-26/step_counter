@@ -135,12 +135,7 @@ void onServiceStart(ServiceInstance service) async {
     lastKnownRawSteps = event.steps;
 
     // A reading below the baseline means the hardware counter restarted —
-    // it counts from the last boot, so a reboot zeroes it. Re-resolve
-    // instead of carrying on: otherwise every delta below clamps to zero,
-    // which overwrites the day's stored total with 0 and freezes the count
-    // there until midnight. Normally the reboot also restarts this isolate
-    // (so the date check catches it first), but some devices reset the
-    // sensor on their own when the sensor hub restarts.
+    // it counts from the last boot, so a reboot zeroes it.
     final sensorReset = baseline != null && event.steps < baseline!;
 
     if (trackedDate != today || sensorReset) {
@@ -152,8 +147,7 @@ void onServiceStart(ServiceInstance service) async {
         event.steps,
         correctionFactor,
       );
-      // A new day's — or a re-baselined day's — running total no longer
-      // lines up with what came before.
+      // New day's — or a re-baselined day's — running total no longer lines up.
       lastTodaySteps = null;
       trackedHourKey = null;
     }
@@ -243,10 +237,8 @@ void _scheduleMidnightNotificationReset(
   });
 }
 
-/// Reads the stored baseline for [date] and re-derives it if the sensor has
-/// restarted since it was written. Runs at most once a day (plus once per
-/// sensor reset), so it always re-reads and re-writes rather than keeping a
-/// fast path.
+/// Reads the stored baseline for [date], re-derives if sensor has restarted
+/// since baseline write, at most once a day (plus once per sensor reset)
 Future<int> _resolveBaseline(
   DatabaseHelper dbHelper,
   String date,
@@ -276,13 +268,6 @@ Future<int> _resolveBaseline(
 }
 
 /// The raw-sensor value that counts as "zero steps" for a day.
-///
-/// [savedBaseline] is reused as long as the sensor is still above it. A
-/// [rawCumulative] *below* it means the hardware counter reset — it counts
-/// from the last reboot — so the baseline is re-derived from the steps
-/// already stored for the day. That result is deliberately negative
-/// (raw restarts near zero while the day already has steps), which is what
-/// keeps the stored total intact and lets new readings add on top of it.
 ///
 /// Split out from [_resolveBaseline] as pure arithmetic so the reboot case
 /// is testable without a sensor, a database, or a service isolate.
