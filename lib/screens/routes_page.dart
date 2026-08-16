@@ -8,10 +8,6 @@ import '../models/saved_route.dart';
 import '../services/metrics.dart';
 import '../services/providers.dart';
 
-/// Saved routes: add one, start/stop tracking against it, see a rough step
-/// estimate from past sessions. Shows the live tracking/summary view
-/// instead of the list whenever a route is active, however this page was
-/// reached.
 class RoutesPage extends ConsumerWidget {
   const RoutesPage({super.key});
 
@@ -70,6 +66,15 @@ class _RoutesListState extends ConsumerState<_RoutesList> {
     setState(() => _pendingDeletes.add(route.id));
     await ref.read(databaseHelperProvider).deleteRoute(route.id);
     ref.invalidate(routesProvider);
+  }
+
+  Future<void> _logToday(SavedRoute route) async {
+    final amount = route.avgSteps!.round();
+    await ref.read(pedometerServiceProvider).addManualSteps(amount);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Added $amount steps to today')),
+    );
   }
 
   @override
@@ -133,6 +138,7 @@ class _RoutesListState extends ConsumerState<_RoutesList> {
                           route: route,
                           onStart: () => _start(route),
                           onDelete: () => _delete(route),
+                          onLogToday: () => _logToday(route),
                         ),
                     ],
                   );
@@ -156,12 +162,39 @@ class _RouteRow extends StatelessWidget {
   final SavedRoute route;
   final VoidCallback onStart;
   final VoidCallback onDelete;
+  final VoidCallback onLogToday;
 
   const _RouteRow({
     required this.route,
     required this.onStart,
     required this.onDelete,
+    required this.onLogToday,
   });
+
+  Future<void> _confirmLogToday(BuildContext context) async {
+    final amount = route.avgSteps!.round();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Add to today?'),
+        content: Text(
+          'This adds ~$amount steps (this route\'s average) to today\'s '
+          'total, without starting a new tracked route.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Add'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) onLogToday();
+  }
 
   Future<bool> _confirmDelete(BuildContext context) async {
     final confirmed = await showDialog<bool>(
@@ -216,6 +249,35 @@ class _RouteRow extends StatelessWidget {
           padding: const EdgeInsets.all(12),
           child: Row(
             children: [
+              PopupMenuButton<String>(
+                icon: const Icon(Icons.more_vert),
+                tooltip: 'More',
+                padding: EdgeInsets.zero,
+                onSelected: (value) async {
+                  if (value == 'logToday') {
+                    await _confirmLogToday(context);
+                  } else if (value == 'delete') {
+                    final confirmed = await _confirmDelete(context);
+                    if (confirmed) onDelete();
+                  }
+                },
+                itemBuilder: (context) => [
+                  if (route.avgSteps != null)
+                    const PopupMenuItem(
+                      value: 'logToday',
+                      child: Text("Add to Today's Steps"),
+                    ),
+                  PopupMenuItem(
+                    value: 'delete',
+                    child: Text(
+                      'Delete',
+                      style:
+                          TextStyle(color: Theme.of(context).colorScheme.error),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(width: 8),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -327,6 +389,48 @@ class _ActiveRouteViewState extends ConsumerState<_ActiveRouteView> {
     await ref.read(activeRouteProvider.notifier).stopRoute();
   }
 
+  Future<void> _cancel() async {
+    final db = ref.read(databaseHelperProvider);
+    final isUnused =
+        await db.getSessionCountForRoute(widget.activeRoute.routeId) == 0;
+    if (!mounted) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Cancel this route?'),
+        content: Text(
+          isUnused
+              ? "This route has no completed sessions yet, so cancelling "
+                  "removes it entirely rather than leaving an empty entry."
+              : "This route's progress won't be saved, and its average "
+                  "won't change — your steps still count toward today's "
+                  "total either way.",
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Keep Going'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Cancel Route'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    // No insertRouteSession call — that's the whole point, this route's
+    // average stays exactly as it was.
+    if (isUnused) {
+      await db.deleteRoute(widget.activeRoute.routeId);
+    }
+    // Both of these must happen before stopRoute()
+    ref.invalidate(routesProvider);
+    await ref.read(activeRouteProvider.notifier).stopRoute();
+  }
+
   String _todayString() {
     final now = DateTime.now();
     return '${now.year.toString().padLeft(4, '0')}-'
@@ -396,31 +500,49 @@ class _ActiveRouteViewState extends ConsumerState<_ActiveRouteView> {
             ),
             const SizedBox(height: 40),
             if (summary == null)
-              FilledButton.icon(
-                icon: const Icon(Icons.stop_circle_outlined),
-                label: const Text('Stop Route'),
-                onPressed: () => _stopAndReview(
-                  steps,
-                  elapsed,
-                  heightCm,
-                  weightKg,
-                  unitSystem,
-                ),
+              Column(
+                children: [
+                  FilledButton.icon(
+                    icon: const Icon(Icons.stop_circle_outlined),
+                    label: const Text('Stop Route'),
+                    onPressed: () => _stopAndReview(
+                      steps,
+                      elapsed,
+                      heightCm,
+                      weightKg,
+                      unitSystem,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  TextButton(
+                    onPressed: _cancel,
+                    child: const Text('Cancel Route'),
+                  ),
+                ],
               )
             else
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
+              Column(
                 children: [
-                  OutlinedButton.icon(
-                    icon: const Icon(Icons.play_arrow),
-                    label: const Text('Resume'),
-                    onPressed: _resume,
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      OutlinedButton.icon(
+                        icon: const Icon(Icons.play_arrow),
+                        label: const Text('Resume'),
+                        onPressed: _resume,
+                      ),
+                      const SizedBox(width: 16),
+                      FilledButton.icon(
+                        icon: const Icon(Icons.check),
+                        label: const Text('Done'),
+                        onPressed: _confirmDone,
+                      ),
+                    ],
                   ),
-                  const SizedBox(width: 16),
-                  FilledButton.icon(
-                    icon: const Icon(Icons.check),
-                    label: const Text('Done'),
-                    onPressed: _confirmDone,
+                  const SizedBox(height: 8),
+                  TextButton(
+                    onPressed: _cancel,
+                    child: const Text('Cancel Route'),
                   ),
                 ],
               ),
