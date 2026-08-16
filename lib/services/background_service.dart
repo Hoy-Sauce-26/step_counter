@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:ui';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:pedometer/pedometer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -133,7 +134,11 @@ void onServiceStart(ServiceInstance service) async {
     final today = _todayString();
     lastKnownRawSteps = event.steps;
 
-    if (trackedDate != today) {
+    // A reading below the baseline means the hardware counter restarted —
+    // it counts from the last boot, so a reboot zeroes it.
+    final sensorReset = baseline != null && event.steps < baseline!;
+
+    if (trackedDate != today || sensorReset) {
       trackedDate = today;
       correctionFactor = await prefsService.getCorrectionFactor();
       baseline = await _resolveBaseline(
@@ -142,7 +147,7 @@ void onServiceStart(ServiceInstance service) async {
         event.steps,
         correctionFactor,
       );
-      // New day: yesterday's "day total so far" no longer applies.
+      // New day's — or a re-baselined day's — running total no longer lines up.
       lastTodaySteps = null;
       trackedHourKey = null;
     }
@@ -232,6 +237,8 @@ void _scheduleMidnightNotificationReset(
   });
 }
 
+/// Reads the stored baseline for [date], re-derives if sensor has restarted
+/// since baseline write, at most once a day (plus once per sensor reset)
 Future<int> _resolveBaseline(
   DatabaseHelper dbHelper,
   String date,
@@ -241,16 +248,13 @@ Future<int> _resolveBaseline(
   final prefs = await SharedPreferences.getInstance();
   final key = 'baseline_$date';
 
-  final saved = prefs.getInt(key);
-  if (saved != null) return saved;
-
   final existing = await dbHelper.getStepsForDate(date);
-  final rawExistingDelta = existing == null
-      ? 0
-      : (correctionFactor == 0
-          ? 0
-          : (existing.stepCount / correctionFactor).round());
-  final baseline = rawCumulative - rawExistingDelta;
+  final baseline = resolveBaselineValue(
+    rawCumulative: rawCumulative,
+    savedBaseline: prefs.getInt(key),
+    existingSteps: existing?.stepCount ?? 0,
+    correctionFactor: correctionFactor,
+  );
 
   await prefs.setInt(key, baseline);
   final keysToRemove = prefs
@@ -261,6 +265,25 @@ Future<int> _resolveBaseline(
   }
 
   return baseline;
+}
+
+/// The raw-sensor value that counts as "zero steps" for a day.
+///
+/// Split out from [_resolveBaseline] as pure arithmetic so the reboot case
+/// is testable without a sensor, a database, or a service isolate.
+@visibleForTesting
+int resolveBaselineValue({
+  required int rawCumulative,
+  required int? savedBaseline,
+  required int existingSteps,
+  required double correctionFactor,
+}) {
+  if (savedBaseline != null && rawCumulative >= savedBaseline) {
+    return savedBaseline;
+  }
+  final rawExistingDelta =
+      correctionFactor == 0 ? 0 : (existingSteps / correctionFactor).round();
+  return rawCumulative - rawExistingDelta;
 }
 
 String _todayString() {
