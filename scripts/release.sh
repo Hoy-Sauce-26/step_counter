@@ -36,6 +36,10 @@ esac
 
 VERSION_NAME="${MAJOR}.${MINOR}.${PATCH}"
 
+echo "Verifying..."
+flutter analyze
+flutter test
+
 echo "Building release APK — version $VERSION_NAME, build number $BUILD_NUMBER..."
 flutter build apk --release \
   --build-number="$BUILD_NUMBER" \
@@ -49,7 +53,8 @@ echo $((BUILD_NUMBER + 1)) > "$BUILD_NUMBER_FILE"
 
 echo "${MAJOR}.${MINOR}.$((PATCH + 1))" > "$VERSION_NAME_FILE"
 
-git add . && git commit -m "Released version $VERSION_NAME"
+git add "$BUILD_NUMBER_FILE" "$VERSION_NAME_FILE"
+git commit -m "Released version $VERSION_NAME"
 git push --set-upstream origin "$(git rev-parse --abbrev-ref HEAD)"
 
 echo "Done — v$VERSION_NAME (build $BUILD_NUMBER) at build/app/outputs/flutter-apk/roamfree_${VERSION_NAME}.apk"
