@@ -36,6 +36,10 @@ esac
 
 VERSION_NAME="${MAJOR}.${MINOR}.${PATCH}"
 
+echo "Verifying..."
+flutter analyze
+flutter test
+
 echo "Building release APK — version $VERSION_NAME, build number $BUILD_NUMBER..."
 flutter build apk --release \
   --build-number="$BUILD_NUMBER" \
