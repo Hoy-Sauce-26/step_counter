@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:step_counter/services/background_service.dart';
+import 'package:step_counter/services/step_accumulator.dart';
 
 /// What the app would display for the day, given a baseline and a raw
 /// reading — mirrors the delta/correction arithmetic in `onServiceStart`.

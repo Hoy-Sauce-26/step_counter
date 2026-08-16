@@ -34,6 +34,26 @@ class PreferencesService {
     await prefs.setDouble(_correctionFactorKey, factor);
   }
 
+  /// The raw-sensor reading that counts as zero steps for [date]. Only the
+  /// current day's is ever needed, so writing one drops every other day's.
+  Future<int?> getStepBaseline(String date) async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt('baseline_$date');
+  }
+
+  Future<void> setStepBaseline(String date, int baseline) async {
+    final prefs = await SharedPreferences.getInstance();
+    final key = 'baseline_$date';
+    await prefs.setInt(key, baseline);
+    final stale = prefs
+        .getKeys()
+        .where((k) => k.startsWith('baseline_') && k != key)
+        .toList();
+    for (final k in stale) {
+      await prefs.remove(k);
+    }
+  }
+
   // Written by the background isolate — the only place allowed to touch the
   // sensor — and read by the app at launch.
   static const _stepSensorAvailableKey = 'stepSensorAvailable';

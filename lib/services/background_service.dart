@@ -4,12 +4,9 @@ import 'dart:ui';
 import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:pedometer/pedometer.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-
-import '../models/daily_steps.dart';
-import 'database_helper.dart';
 import 'notification_service.dart';
 import 'preferences_service.dart';
+import 'step_accumulator.dart';
 
 const backgroundNotificationChannelId = 'step_counter_channel';
 const backgroundNotificationId = 888;
@@ -52,25 +49,16 @@ void onServiceStart(ServiceInstance service) async {
   });
 
   final prefsService = PreferencesService();
-  final dbHelper = DatabaseHelper.instance;
 
-  String? trackedDate;
-  int? baseline;
+  // All day/hour/manual bookkeeping lives here. This isolate keeps no copy of
+  // it, so there is nothing to drift out of sync.
+  final accumulator = StepAccumulator(
+    PersistentStepStore(),
+    correctionFactor: await prefsService.getCorrectionFactor(),
+  );
 
-  // Both of these are snapshots, not live reads.
-  double correctionFactor = await prefsService.getCorrectionFactor();
+  // A snapshot, not a live read: see StepAccumulator.correctionFactor.
   int dailyTarget = await prefsService.getDailyTarget();
-
-  // Steps manually credited to today (a route logged without live tracking)
-  int manualSteps = await prefsService.getManualSteps(_todayString());
-
-  // Hourly bucketing: hourStartDayTotal is the day's running total when
-  // the current hour began — same idea as the daily baseline, one level in.
-  String? trackedHourKey;
-  // Hourly buckets track sensor steps only
-  int? hourStartSensorTotal;
-  int? lastSensorSteps;
-  int? lastTodaySteps;
 
   int? lastKnownRawSteps;
 
@@ -92,7 +80,7 @@ void onServiceStart(ServiceInstance service) async {
   // The only way a recalibration reaches this isolate.
   service.on('setCorrectionFactor').listen((event) {
     final factor = (event?['factor'] as num?)?.toDouble();
-    if (factor != null) correctionFactor = factor;
+    if (factor != null) accumulator.correctionFactor = factor;
   });
 
   // Same deal for the target
@@ -128,34 +116,18 @@ void onServiceStart(ServiceInstance service) async {
     // Revert the notification immediately rather than waiting for the
     // next step event.
     await NotificationService.updateStepNotification(
-      steps: lastTodaySteps ?? 0,
+      steps: accumulator.lastDisplaySteps ?? 0,
       target: dailyTarget,
     );
   });
 
   service.on('addManualSteps').listen((event) async {
     final amount = event?['steps'] as int?;
-    if (amount == null || amount <= 0) return;
-    final today = _todayString();
-    if (trackedDate != today) {
-      // A manual credit can arrive before the day's first reading, when
-      // manualSteps still holds yesterday's figure. Reload it, but leave
-      // trackedDate alone
-      manualSteps = await prefsService.getManualSteps(today);
-      lastTodaySteps = null;
-      lastSensorSteps = null;
-      trackedHourKey = null;
-    }
-    manualSteps += amount;
-    await prefsService.setManualSteps(today, manualSteps);
+    if (amount == null) return;
+    final newTotal = await accumulator.creditManualSteps(amount, DateTime.now());
+    if (newTotal == null) return;
 
-    final runningTotal = lastTodaySteps ??
-        (await dbHelper.getStepsForDate(today))?.stepCount ??
-        0;
-    final newTotal = runningTotal + amount;
-    lastTodaySteps = newTotal;
-    await dbHelper.upsertSteps(DailySteps(date: today, stepCount: newTotal));
-    // Deliberately no upsertHourlySteps: these steps have no hour.
+    // Push an update rather than waiting for the next real reading.
     if (activeRoute == null) {
       await NotificationService.updateStepNotification(
         steps: newTotal,
@@ -185,59 +157,11 @@ void onServiceStart(ServiceInstance service) async {
 
   Pedometer.stepCountStream.listen((event) async {
     final now = DateTime.now();
-    final today = _todayString();
     lastKnownRawSteps = event.steps;
     await recordSensorStatus(true);
 
-    // A reading below the baseline means the hardware counter restarted —
-    // it counts from the last boot, so a reboot zeroes it.
-    final sensorReset = baseline != null && event.steps < baseline!;
-
-    if (trackedDate != today || sensorReset) {
-      trackedDate = today;
-      manualSteps = await prefsService.getManualSteps(today);
-      baseline = await _resolveBaseline(
-        dbHelper,
-        today,
-        event.steps,
-        correctionFactor,
-        manualSteps,
-      );
-      // New day's — or a re-baselined day's — running total no longer lines up.
-      lastTodaySteps = null;
-      lastSensorSteps = null;
-      trackedHourKey = null;
-    }
-
-    final rawDelta =
-        (event.steps - (baseline ?? event.steps)).clamp(0, 1 << 30);
-    final sensorSteps = (rawDelta * correctionFactor).round();
-    final displaySteps = sensorSteps + manualSteps;
-
-    // Hourly bucketing, over sensor steps only.
-    final currentHour = now.hour;
-    final hourKey = '$today-$currentHour';
-    if (trackedHourKey != hourKey) {
-      trackedHourKey = hourKey;
-      // If this hour already has a persisted count (service restarted
-      // mid-hour), resume from it instead of resetting or double
-      // counting. Otherwise start from the previous event's day-total so
-      // this hour's first step shows up right away.
-      final existingHour =
-          await dbHelper.getHourlyStepsForDateAndHour(today, currentHour);
-      hourStartSensorTotal = existingHour != null
-          ? sensorSteps - existingHour
-          : (lastSensorSteps ?? sensorSteps);
-    }
-    final hourlySteps =
-        (sensorSteps - (hourStartSensorTotal ?? sensorSteps)).clamp(0, 1 << 30);
-
-    await dbHelper.upsertSteps(
-      DailySteps(date: today, stepCount: displaySteps),
-    );
-    await dbHelper.upsertHourlySteps(today, currentHour, hourlySteps);
-    lastTodaySteps = displaySteps;
-    lastSensorSteps = sensorSteps;
+    final reading = await accumulator.record(event.steps, now);
+    final displaySteps = reading.displaySteps;
 
     // Steps always count toward the daily total above regardless of an
     // active route — only the notification display branches.
@@ -251,7 +175,7 @@ void onServiceStart(ServiceInstance service) async {
         stepsBefore: route['stepsBefore'] as int? ?? 0,
         bankedSteps: route['steps'] as int?,
         lastRaw: route['lastRaw'] as int?,
-        correctionFactor: correctionFactor,
+        correctionFactor: accumulator.correctionFactor,
       );
       final routeSteps = progress.steps;
 
@@ -311,41 +235,6 @@ void _scheduleMidnightNotificationReset(
   });
 }
 
-/// Reads the stored baseline for [date], re-derives if sensor has restarted
-/// since baseline write, at most once a day (plus once per sensor reset)
-Future<int> _resolveBaseline(
-  DatabaseHelper dbHelper,
-  String date,
-  int rawCumulative,
-  double correctionFactor,
-  int manualSteps,
-) async {
-  final prefs = await SharedPreferences.getInstance();
-  final key = 'baseline_$date';
-
-  final existing = await dbHelper.getStepsForDate(date);
-  // Only the sensor-derived part of the stored total can be turned back into
-  // a raw reading.
-  final sensorSteps =
-      ((existing?.stepCount ?? 0) - manualSteps).clamp(0, 1 << 30);
-  final baseline = resolveBaselineValue(
-    rawCumulative: rawCumulative,
-    savedBaseline: prefs.getInt(key),
-    existingSteps: sensorSteps,
-    correctionFactor: correctionFactor,
-  );
-
-  await prefs.setInt(key, baseline);
-  final keysToRemove = prefs
-      .getKeys()
-      .where((k) => k.startsWith('baseline_') && k != key);
-  for (final k in keysToRemove) {
-    await prefs.remove(k);
-  }
-
-  return baseline;
-}
-
 /// An in-progress route's counters after folding in one raw reading.
 @visibleForTesting
 class RouteProgress {
@@ -392,28 +281,3 @@ RouteProgress resolveRouteProgress({
   );
 }
 
-/// The raw-sensor value that counts as "zero steps" for a day.
-///
-/// Split out from [_resolveBaseline] as pure arithmetic so the reboot case
-/// is testable without a sensor, a database, or a service isolate.
-@visibleForTesting
-int resolveBaselineValue({
-  required int rawCumulative,
-  required int? savedBaseline,
-  required int existingSteps,
-  required double correctionFactor,
-}) {
-  if (savedBaseline != null && rawCumulative >= savedBaseline) {
-    return savedBaseline;
-  }
-  final rawExistingDelta =
-      correctionFactor == 0 ? 0 : (existingSteps / correctionFactor).round();
-  return rawCumulative - rawExistingDelta;
-}
-
-String _todayString() {
-  final now = DateTime.now();
-  return '${now.year.toString().padLeft(4, '0')}-'
-      '${now.month.toString().padLeft(2, '0')}-'
-      '${now.day.toString().padLeft(2, '0')}';
-}
