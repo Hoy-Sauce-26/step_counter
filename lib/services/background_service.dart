@@ -83,6 +83,9 @@ void onServiceStart(ServiceInstance service) async {
       'name': savedRoute['routeName'] as String,
       'startTime': DateTime.parse(savedRoute['startTime'] as String),
       'rawBaseline': savedRoute['rawBaseline'] as int?,
+      'stepsBefore': savedRoute['stepsBefore'] as int? ?? 0,
+      'steps': savedRoute['steps'] as int? ?? 0,
+      'lastRaw': savedRoute['lastRaw'] as int?,
     };
   }
 
@@ -108,6 +111,8 @@ void onServiceStart(ServiceInstance service) async {
       'name': name,
       'startTime': startTime,
       'rawBaseline': lastKnownRawSteps,
+      'stepsBefore': 0,
+      'steps': 0,
     };
     await prefsService.setActiveRoute(
       routeId: id,
@@ -240,18 +245,29 @@ void onServiceStart(ServiceInstance service) async {
     if (route != null) {
       // rawBaseline is already set unless a route started before this
       // service had ever seen a step — rare fallback, still absorbs one.
-      final routeBaseline = (route['rawBaseline'] as int?) ?? event.steps;
-      if (route['rawBaseline'] == null) {
-        route['rawBaseline'] = routeBaseline;
-        await prefsService.setActiveRoute(
-          routeId: route['id'] as int,
-          routeName: route['name'] as String,
-          startTime: route['startTime'] as DateTime,
-          rawBaseline: routeBaseline,
-        );
-      }
-      final routeRawDelta = (event.steps - routeBaseline).clamp(0, 1 << 30);
-      final routeSteps = (routeRawDelta * correctionFactor).round();
+      final progress = resolveRouteProgress(
+        rawCumulative: event.steps,
+        rawBaseline: (route['rawBaseline'] as int?) ?? event.steps,
+        stepsBefore: route['stepsBefore'] as int? ?? 0,
+        bankedSteps: route['steps'] as int?,
+        lastRaw: route['lastRaw'] as int?,
+        correctionFactor: correctionFactor,
+      );
+      final routeSteps = progress.steps;
+
+      route['rawBaseline'] = progress.rawBaseline;
+      route['stepsBefore'] = progress.stepsBefore;
+      route['steps'] = routeSteps;
+      route['lastRaw'] = progress.lastRaw;
+      await prefsService.setActiveRoute(
+        routeId: route['id'] as int,
+        routeName: route['name'] as String,
+        startTime: route['startTime'] as DateTime,
+        rawBaseline: progress.rawBaseline,
+        stepsBefore: progress.stepsBefore,
+        steps: routeSteps,
+        lastRaw: progress.lastRaw,
+      );
       await NotificationService.updateRouteNotification(
         routeName: route['name'] as String,
         steps: routeSteps,
@@ -328,6 +344,67 @@ Future<int> _resolveBaseline(
   }
 
   return baseline;
+}
+
+/// An in-progress route's counters after folding in one raw reading.
+@visibleForTesting
+class RouteProgress {
+  final int rawBaseline;
+  final int stepsBefore;
+  final int steps;
+  final int lastRaw;
+
+  const RouteProgress({
+    required this.rawBaseline,
+    required this.stepsBefore,
+    required this.steps,
+    required this.lastRaw,
+  });
+}
+
+/// Advances a route's counters for one reading.
+///
+/// A reading below the previous one means the hardware counter restarted — a
+/// reboot, which also kills the service isolate. The route's banked total
+/// carries across and a fresh segment starts from here. Without that the
+/// delta clamps to zero for the remainder of the walk, and because the figure
+/// written to the route's history is this one, the session recorded at the
+/// end would drag the route's stored average down permanently.
+///
+/// Detection compares against [lastRaw] rather than [rawBaseline]: the first
+/// reset drops the baseline to whatever the counter read at the time, which
+/// is typically zero, and nothing is ever below zero. A second reboot in the
+/// same walk would then go unnoticed and lose the segment between them.
+/// [rawBaseline] is still checked for the first reading after a restart,
+/// where no previous reading survived.
+///
+/// The correction factor applies to a whole segment rather than to each
+/// reading: rounding per reading drifts badly across a route's worth of
+/// single-step events.
+@visibleForTesting
+RouteProgress resolveRouteProgress({
+  required int rawCumulative,
+  required int rawBaseline,
+  required int stepsBefore,
+  required int? bankedSteps,
+  required int? lastRaw,
+  required double correctionFactor,
+}) {
+  var baseline = rawBaseline;
+  var before = stepsBefore;
+
+  if (rawCumulative < baseline || (lastRaw != null && rawCumulative < lastRaw)) {
+    before = bankedSteps ?? before;
+    baseline = rawCumulative;
+  }
+
+  final delta = (rawCumulative - baseline).clamp(0, 1 << 30);
+  return RouteProgress(
+    rawBaseline: baseline,
+    stepsBefore: before,
+    steps: before + (delta * correctionFactor).round(),
+    lastRaw: rawCumulative,
+  );
 }
 
 /// The raw-sensor value that counts as "zero steps" for a day.

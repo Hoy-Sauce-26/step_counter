@@ -105,11 +105,19 @@ class PreferencesService {
   // read/clear atomically.
   static const _activeRouteKey = 'activeRoute';
 
+  /// [rawBaseline] is the raw sensor reading this route's current segment
+  /// counts from. [stepsBefore] is what earlier segments contributed, and
+  /// [steps] is the running total — kept so a reboot, which zeroes the
+  /// hardware counter and takes the service isolate with it, can pick the
+  /// route back up instead of restarting it at nothing.
   Future<void> setActiveRoute({
     required int routeId,
     required String routeName,
     required DateTime startTime,
     int? rawBaseline,
+    int stepsBefore = 0,
+    int steps = 0,
+    int? lastRaw,
   }) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(
@@ -119,6 +127,9 @@ class PreferencesService {
         'routeName': routeName,
         'startTime': startTime.toIso8601String(),
         'rawBaseline': rawBaseline,
+        'stepsBefore': stepsBefore,
+        'steps': steps,
+        'lastRaw': lastRaw,
       }),
     );
   }
