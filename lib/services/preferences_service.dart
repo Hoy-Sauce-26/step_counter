@@ -34,6 +34,18 @@ class PreferencesService {
     await prefs.setDouble(_correctionFactorKey, factor);
   }
 
+  static const _lastRawStepsKey = 'lastRawSteps';
+
+  Future<int?> getLastRawSteps() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt(_lastRawStepsKey);
+  }
+
+  Future<void> setLastRawSteps(int rawCumulative) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_lastRawStepsKey, rawCumulative);
+  }
+
   /// The raw-sensor reading that counts as zero steps for [date]. Only the
   /// current day's is ever needed, so writing one drops every other day's.
   Future<int?> getStepBaseline(String date) async {

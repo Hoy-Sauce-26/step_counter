@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import '../models/daily_steps.dart';
 import 'database_helper.dart';
 import 'preferences_service.dart';
@@ -15,6 +17,10 @@ abstract class StepStore {
 
   Future<int?> readHourlySteps(String date, int hour);
   Future<void> writeHourlySteps(String date, int hour, int steps);
+
+  /// The last raw reading seen, across all days. Device-wide, not per-date.
+  Future<int?> readLastRaw();
+  Future<void> writeLastRaw(int rawCumulative);
 }
 
 /// What one sensor reading worked out to.
@@ -59,6 +65,9 @@ class StepAccumulator {
   int _lastSensorSteps = 0;
   int? _lastDisplaySteps;
 
+  /// The previous raw reading.
+  int? _lastRawSteps;
+
   /// The most recent displayed total, or null if nothing has been recorded
   /// since this accumulator was created.
   int? get lastDisplaySteps => _lastDisplaySteps;
@@ -67,7 +76,16 @@ class StepAccumulator {
   Future<StepReading> record(int rawCumulative, DateTime now) async {
     final date = dateKey(now);
 
-    final sensorReset = _baseline != null && rawCumulative < _baseline!;
+    // A reading below the previous one means the hardware counter restarted:
+    // it counts from the last boot, so a reboot zeroes it.
+    //
+    // Compared against the previous reading, not the baseline. The baseline
+    // goes negative after the first reset of a day, and nothing falls below a
+    // negative number — so a second reboot the same day went unnoticed, the
+    // stale baseline survived, and the day reverted to its total as of the
+    // first reboot, discarding everything walked between them.
+    final previousRaw = _lastRawSteps ?? await _store.readLastRaw();
+    final sensorReset = previousRaw != null && rawCumulative < previousRaw;
 
     if (_trackedDate != date || sensorReset) {
       _trackedDate = date;
@@ -81,8 +99,12 @@ class StepAccumulator {
       // the readings below. Manual credits never came from the sensor.
       final storedSensorSteps = (storedTotal - _manualSteps).clamp(0, 1 << 30);
 
-      _baseline =
-          await _resolveBaseline(date, rawCumulative, storedSensorSteps);
+      _baseline = await _resolveBaseline(
+        date,
+        rawCumulative,
+        storedSensorSteps,
+        sensorReset,
+      );
       // A new day's — or a re-baselined day's — running totals no longer line
       // up with what came before.
       _lastDisplaySteps = null;
@@ -108,6 +130,9 @@ class StepAccumulator {
 
     await _store.writeDailySteps(date, displaySteps);
     await _store.writeHourlySteps(date, hour, hourlySteps);
+    // Written on every reading and never buffered. A stale value is a no-no
+    _lastRawSteps = rawCumulative;
+    await _store.writeLastRaw(rawCumulative);
     _lastDisplaySteps = displaySteps;
     _lastSensorSteps = sensorSteps;
 
@@ -154,10 +179,12 @@ class StepAccumulator {
     String date,
     int rawCumulative,
     int storedSensorSteps,
+    bool sensorHasReset,
   ) async {
     final baseline = resolveBaselineValue(
       rawCumulative: rawCumulative,
       savedBaseline: await _store.readBaseline(date),
+      sensorHasReset: sensorHasReset,
       existingSteps: storedSensorSteps,
       correctionFactor: correctionFactor,
     );
@@ -171,10 +198,11 @@ class StepAccumulator {
 int resolveBaselineValue({
   required int rawCumulative,
   required int? savedBaseline,
+  required bool sensorHasReset,
   required int existingSteps,
   required double correctionFactor,
 }) {
-  if (savedBaseline != null && rawCumulative >= savedBaseline) {
+  if (savedBaseline != null && !sensorHasReset) {
     return savedBaseline;
   }
   final rawExistingDelta =
@@ -188,6 +216,112 @@ String dateKey(DateTime moment) {
   return '${moment.year.toString().padLeft(4, '0')}-'
       '${moment.month.toString().padLeft(2, '0')}-'
       '${moment.day.toString().padLeft(2, '0')}';
+}
+
+class ThrottledStepStore implements StepStore {
+  ThrottledStepStore(
+    this._inner, {
+    this.flushInterval = const Duration(seconds: 10),
+  });
+
+  final StepStore _inner;
+
+  /// How long a write may sit unwritten. Also the ceiling on how stale the
+  /// app's own reads of the database can be, since it reads the same rows.
+  final Duration flushInterval;
+
+  final Map<String, int> _pendingDaily = {};
+  final Map<String, int> _pendingHourly = {};
+  Timer? _flushTimer;
+
+  static String _hourKey(String date, int hour) => '$date@$hour';
+
+  @override
+  Future<int?> readDailySteps(String date) async =>
+      _pendingDaily[date] ?? await _inner.readDailySteps(date);
+
+  @override
+  Future<int?> readHourlySteps(String date, int hour) async =>
+      _pendingHourly[_hourKey(date, hour)] ??
+      await _inner.readHourlySteps(date, hour);
+
+  @override
+  Future<void> writeDailySteps(String date, int steps) async {
+    _pendingDaily[date] = steps;
+    _scheduleFlush();
+  }
+
+  @override
+  Future<void> writeHourlySteps(String date, int hour, int steps) async {
+    _pendingHourly[_hourKey(date, hour)] = steps;
+    _scheduleFlush();
+  }
+
+  @override
+  Future<void> writeBaseline(String date, int baseline) async {
+    await flush();
+    await _inner.writeBaseline(date, baseline);
+  }
+
+  @override
+  Future<void> writeManualSteps(String date, int steps) async {
+    await flush();
+    await _inner.writeManualSteps(date, steps);
+  }
+
+  @override
+  Future<int?> readBaseline(String date) => _inner.readBaseline(date);
+
+  @override
+  Future<int> readManualSteps(String date) => _inner.readManualSteps(date);
+
+  @override
+  Future<int?> readLastRaw() => _inner.readLastRaw();
+
+  // Not buffered, unlike the rows above. Losing this one is different as a
+  // value left sitting below a post-reboot reading makes the restart invisible.
+  @override
+  Future<void> writeLastRaw(int rawCumulative) =>
+      _inner.writeLastRaw(rawCumulative);
+
+  /// Commits everything buffered. Call before the service stops — a timer that
+  /// never fires is the one way buffered steps go missing for good.
+  Future<void> flush() async {
+    _flushTimer?.cancel();
+    _flushTimer = null;
+
+    for (final entry in Map<String, int>.from(_pendingDaily).entries) {
+      await _inner.writeDailySteps(entry.key, entry.value);
+      // Only drop it if nothing newer arrived while the write was in flight.
+      if (_pendingDaily[entry.key] == entry.value) {
+        _pendingDaily.remove(entry.key);
+      }
+    }
+
+    for (final entry in Map<String, int>.from(_pendingHourly).entries) {
+      final split = entry.key.lastIndexOf('@');
+      await _inner.writeHourlySteps(
+        entry.key.substring(0, split),
+        int.parse(entry.key.substring(split + 1)),
+        entry.value,
+      );
+      if (_pendingHourly[entry.key] == entry.value) {
+        _pendingHourly.remove(entry.key);
+      }
+    }
+  }
+
+  void _scheduleFlush() {
+    _flushTimer ??= Timer(flushInterval, () {
+      _flushTimer = null;
+      unawaited(flush());
+    });
+  }
+
+  void dispose() {
+    _flushTimer?.cancel();
+    _flushTimer = null;
+  }
 }
 
 /// The real [StepStore], over the app's database and preferences.
@@ -228,4 +362,11 @@ class PersistentStepStore implements StepStore {
   @override
   Future<void> writeHourlySteps(String date, int hour, int steps) =>
       _db.upsertHourlySteps(date, hour, steps);
+
+  @override
+  Future<int?> readLastRaw() => _prefs.getLastRawSteps();
+
+  @override
+  Future<void> writeLastRaw(int rawCumulative) =>
+      _prefs.setLastRawSteps(rawCumulative);
 }
