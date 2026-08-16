@@ -53,7 +53,10 @@ echo $((BUILD_NUMBER + 1)) > "$BUILD_NUMBER_FILE"
 
 echo "${MAJOR}.${MINOR}.$((PATCH + 1))" > "$VERSION_NAME_FILE"
 
-git add "$BUILD_NUMBER_FILE" "$VERSION_NAME_FILE"
+sed -i.bak -E "s/^version: .*/version: ${VERSION_NAME}+${BUILD_NUMBER}/" pubspec.yaml
+rm -f pubspec.yaml.bak
+
+git add "$BUILD_NUMBER_FILE" "$VERSION_NAME_FILE" pubspec.yaml
 git commit -m "Released version $VERSION_NAME"
 git push --set-upstream origin "$(git rev-parse --abbrev-ref HEAD)"
 

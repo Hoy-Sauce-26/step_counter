@@ -448,8 +448,7 @@ class _PermissionDenied extends StatelessWidget {
             const Icon(Icons.directions_walk, size: 48),
             const SizedBox(height: 16),
             const Text(
-              'Step Counter needs activity/motion permission to count '
-              'your steps.',
+              'Roamfree needs activity permission to count your steps.',
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 16),
