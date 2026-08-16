@@ -53,8 +53,10 @@ class StepAccumulator {
   int _manualSteps = 0;
 
   String? _trackedHourKey;
-  int? _hourStartSensorTotal;
-  int? _lastSensorSteps;
+
+  // The sensor total at hour start, and the total at the previous reading.
+  int _hourStartSensorTotal = 0;
+  int _lastSensorSteps = 0;
   int? _lastDisplaySteps;
 
   /// The most recent displayed total, or null if nothing has been recorded
@@ -73,11 +75,21 @@ class StepAccumulator {
       // from the stored daily total, which includes manual credits, and those
       // have to come back out before that arithmetic means anything.
       _manualSteps = await _store.readManualSteps(date);
-      _baseline = await _resolveBaseline(date, rawCumulative);
+
+      final storedTotal = await _store.readDailySteps(date) ?? 0;
+      // Only the sensor-derived part of the stored total is comparable with
+      // the readings below. Manual credits never came from the sensor.
+      final storedSensorSteps = (storedTotal - _manualSteps).clamp(0, 1 << 30);
+
+      _baseline =
+          await _resolveBaseline(date, rawCumulative, storedSensorSteps);
       // A new day's — or a re-baselined day's — running totals no longer line
       // up with what came before.
       _lastDisplaySteps = null;
-      _lastSensorSteps = null;
+      // Recovered rather than forgotten: on a mid-day restart this is what
+      // the resumed hour needs to work out how much of the next reading is
+      // actually new.
+      _lastSensorSteps = storedSensorSteps;
       _trackedHourKey = null;
     }
 
@@ -90,13 +102,11 @@ class StepAccumulator {
     final hourKey = '$date-$hour';
     if (_trackedHourKey != hourKey) {
       _trackedHourKey = hourKey;
-      final existingHour = await _store.readHourlySteps(date, hour);
-      _hourStartSensorTotal = existingHour != null
-          ? sensorSteps - existingHour
-          : (_lastSensorSteps ?? sensorSteps);
+      // Anchor the hour to the sensor total as it stood *before* this reading.
+      final existingHour = await _store.readHourlySteps(date, hour) ?? 0;
+      _hourStartSensorTotal = _lastSensorSteps - existingHour;
     }
-    final hourlySteps =
-        (sensorSteps - (_hourStartSensorTotal ?? sensorSteps)).clamp(0, 1 << 30);
+    final hourlySteps = (sensorSteps - _hourStartSensorTotal).clamp(0, 1 << 30);
 
     await _store.writeDailySteps(date, displaySteps);
     await _store.writeHourlySteps(date, hour, hourlySteps);
@@ -124,7 +134,7 @@ class StepAccumulator {
       // still holds yesterday's figure. Reload it but leave _trackedDate alone.
       _manualSteps = await _store.readManualSteps(date);
       _lastDisplaySteps = null;
-      _lastSensorSteps = null;
+      _lastSensorSteps = 0;
       _trackedHourKey = null;
     }
 
@@ -141,16 +151,16 @@ class StepAccumulator {
     return newTotal;
   }
 
-  Future<int> _resolveBaseline(String date, int rawCumulative) async {
-    final existing = await _store.readDailySteps(date) ?? 0;
-    // Only the sensor-derived part of the stored total can be turned back
-    // into a raw reading.
-    final sensorPortion = (existing - _manualSteps).clamp(0, 1 << 30);
-
+  /// [storedSensorSteps] is the day's stored total without manual credits.
+  Future<int> _resolveBaseline(
+    String date,
+    int rawCumulative,
+    int storedSensorSteps,
+  ) async {
     final baseline = resolveBaselineValue(
       rawCumulative: rawCumulative,
       savedBaseline: await _store.readBaseline(date),
-      existingSteps: sensorPortion,
+      existingSteps: storedSensorSteps,
       correctionFactor: correctionFactor,
     );
 
