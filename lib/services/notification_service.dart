@@ -24,7 +24,7 @@ class NotificationService {
     if (androidPlugin != null) {
       const AndroidNotificationChannel channel = AndroidNotificationChannel(
         'step_counter_channel',
-        'Step Counter Updates',
+        'Step tracking',
         description: 'Ongoing daily step counter notification',
         importance: Importance.low,
       );
@@ -50,7 +50,7 @@ class NotificationService {
 
     final AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
       'step_counter_channel', // Channel ID
-      'Step Counter Updates', // Channel Name
+      'Step tracking', // Channel Name
       channelDescription: 'Ongoing daily step counter notification',
       importance: Importance.low, // Keeps it quiet when updating frequently
       priority: Priority.low,
@@ -86,7 +86,7 @@ class NotificationService {
   }) async {
     final androidDetails = AndroidNotificationDetails(
       'step_counter_channel',
-      'Step Counter Updates',
+      'Step tracking',
       channelDescription: 'Ongoing daily step counter notification',
       importance: Importance.low,
       priority: Priority.low,
@@ -113,7 +113,7 @@ class NotificationService {
   static Future<void> showSensorUnavailableNotification() async {
     final androidDetails = AndroidNotificationDetails(
       'step_counter_channel',
-      'Step Counter Updates',
+      'Step tracking',
       channelDescription: 'Ongoing daily step counter notification',
       importance: Importance.low,
       priority: Priority.low,

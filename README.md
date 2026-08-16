@@ -1,173 +1,190 @@
 # Roamfree
 
-A free, no-ads, no-catch step counter. Live step tracking with a persistent
-background service, a daily target with progress ring, distance/calorie/time
-estimates, a 7-day history chart, and sensor calibration — built to keep
-growing with fun features over time (gamified milestones, etc.) without ever
-charging for it.
+A free, no-ads step counter: live tracking from a persistent background
+service, a daily target with progress ring, distance/calorie/time estimates,
+history charts, saved routes, and sensor calibration.
 
 - **Package:** `com.nttech.roamfree`
-- **Platform:** Android only. iOS has never been built or tested against
-  this codebase — several core pieces (the background service, the
-  persistent notification, the sensor permission flow) are Android-specific
-  and would need real work to port.
+- **Platform:** Android only. iOS has never been built or tested — the
+  background service, the notification and the permission flow are all
+  Android-specific.
 
 ## What it does
 
-- **Live step tracking**, via the phone's hardware step-count sensor,
-  running continuously in a background service — not just while the app is
-  open.
-- **Persistent notification** showing today's step count, target, and
-  progress percentage, kept up to date by that same background service.
-- **Daily target** with a circular progress ring, editable from the app bar.
-- **Distance / calories / active time** estimates derived from step count
-  (no GPS).
-- **7-day history chart**, target-relative: bars are colored by whether that
-  day hit the target, y-axis floor is always at least the target.
-- **Calibration**: a manual percentage slider (90–110%) plus a guided
-  100-step test that measures the sensor's real accuracy and suggests a
-  correction factor.
-- **Auto-starts on boot** (once the app has been opened at least once, per
-  Android's restrictions on cold-installed apps — see Known limitations).
+- **Live step tracking** from the hardware step sensor, in a background
+  service — not only while the app is open.
+- **Persistent notification** with today's count, target and progress.
+- **Daily target** with a progress ring, editable from the app bar.
+- **Distance / calories / active time**, derived from step count (no GPS).
+- **7-day chart**, target-relative: bars colored by whether the day hit the
+  target, y-axis floor at least the target. Tap a day for its hourly
+  breakdown.
+- **Saved routes**: name a walk, track it live, keep a running average.
+  Cancel without recording a session, or log one to today after the fact.
+- **Personalization**: optional height and weight sharpen the estimates;
+  metric or imperial throughout.
+- **Calibration**: a 90–110% slider, plus a guided 100-step test that measures
+  the sensor's accuracy and suggests a correction factor.
+- **Auto-starts on boot**, once the app has been opened at least once.
 
 ## Architecture — read this before touching sensor code
 
-The single most important design constraint in this codebase:
+> **Only one place may call `Pedometer.stepCountStream.listen()`.**
 
-> **Only one place is allowed to call `Pedometer.stepCountStream.listen()`.**
+The plugin supports a single active native listener. A second `.listen()` —
+even briefly, even from another isolate — can silently kill the first, and it
+presents as "steps just stop updating, no error." It has happened twice here.
 
-Android's step-count sensor plugin only supports one active native listener
-at a time. Two independent `.listen()` calls — even briefly, even from
-different Dart isolates — can silently break the "loser" listener, including
-tearing down the app's ability to count steps at all until a full restart.
-This has happened twice during development (once between the main app and a
-calibration-test helper, once between the main isolate and the background
-service) and both times manifested as "steps just stop updating, no error."
-
-The current, correct ownership split:
-
-| Sensor stream | Owner | Why |
+| Stream | Owner | Why |
 | :--- | :--- | :--- |
-| `Pedometer.stepCountStream` (step count) | `background_service.dart`, inside `onServiceStart` | Needs to keep running when the app is backgrounded, killed, or not yet opened — a main-isolate listener can't survive any of those. |
-| `Pedometer.pedestrianStatusStream` (walking/stopped) | `PedometerService`, main isolate | Separate native channel, never involved in the conflict above — used only for the "Motion detected" chip while waiting for the first step. |
+| `stepCountStream` | `background_service.dart`, in `onServiceStart` | Must survive the app being backgrounded, killed, or never opened. |
+| `pedestrianStatusStream` | `PedometerService`, main isolate | Different native channel, so no conflict. Nothing reads its output — it is subscribed purely because dropping it made step readings arrive in laggy batches. |
 
-The main app never talks to the step-count sensor directly. `PedometerService`
-listens to the background service's `stepUpdate` / `rawStep` broadcasts
-(`FlutterBackgroundService().on(...)`) and exposes those as normal Dart
-streams for the UI and calibration test to consume.
+The app never touches the step sensor. `PedometerService` relays the service's
+`stepUpdate` / `rawStep` broadcasts as ordinary Dart streams.
+
+### Where the counting happens
+
+`StepAccumulator` turns raw readings into daily and hourly totals, reaching
+storage only through `StepStore` — which a test satisfies with four maps, so a
+day, a reboot and an hour boundary run in milliseconds. Nearly every counting
+bug this project has had lived in that logic while it was inline in
+`onServiceStart` and unreachable from a test.
+
+Three things are load-bearing:
+
+- **The day's total is derived, not accumulated** — recomputed each reading as
+  `(raw − baseline) × correctionFactor`. That is why a lost write is harmless,
+  and why `ThrottledStepStore` can buffer writes at all.
+- **A counter reset is detected against the previous reading, not the
+  baseline.** The baseline goes negative after the first reboot of a day, and
+  nothing falls below a negative number — comparing against it misses a second
+  reboot and reverts the day. The previous reading is persisted on every
+  reading and never buffered.
+- **The daily target and correction factor are mirrored to the service over
+  `invoke`.** SharedPreferences gives each isolate a private copy, so a value
+  the app writes is invisible there. `StepAccumulator` has no storage access
+  for the factor, making a re-read impossible rather than merely discouraged.
 
 ### Key files
 
 ```
 lib/
-├── main.dart                        — app entry point, service init order matters here
-├── models/
-│   └── daily_steps.dart             — {date, stepCount} record
+├── main.dart                    — entry point; service init order matters
+├── models/                      — daily_steps, hourly_steps, saved_route
 ├── services/
-│   ├── background_service.dart      — owns the sole step-count listener; foreground service config
-│   ├── pedometer_service.dart       — main-isolate bridge; reads background service broadcasts
-│   ├── notification_service.dart    — the persistent notification (flutter_local_notifications)
-│   ├── database_helper.dart         — sqflite: daily step history
-│   ├── preferences_service.dart     — shared_preferences: daily target, calibration factor
-│   ├── metrics.dart                 — step → distance/calories/time formulas
-│   └── providers.dart               — Riverpod providers wiring the above together
-├── screens/
-│   └── home_page.dart               — the whole UI: ring, metric cards, 7-day chart
-└── widgets/
-    ├── step_progress_ring.dart
-    ├── metric_card.dart
-    ├── edit_target_dialog.dart
-    ├── calibration_dialog.dart
-    ├── calibration_test_dialog.dart
-    └── charts/weekly_bar_chart.dart
+│   ├── background_service.dart  — sole step-count listener; foreground config
+│   ├── step_accumulator.dart    — the counting: StepAccumulator, StepStore
+│   ├── pedometer_service.dart   — main-isolate bridge to the service
+│   ├── notification_service.dart
+│   ├── database_helper.dart     — sqflite: history, routes, sessions
+│   ├── preferences_service.dart — target, calibration, baseline, last raw
+│   ├── metrics.dart             — step → distance/calories/time
+│   └── providers.dart           — Riverpod wiring
+├── screens/                     — home_page, routes_page
+└── widgets/                     — ring, cards, dialogs, charts/
+
+test/                            — ~90 tests, no device needed
 ```
 
 ## Setup
 
 ```
 flutter pub get
+flutter test
 ```
+
+The tests need no device or sensor: step accounting runs against an in-memory
+`StepStore`, and the database tests run sqflite on the host via
+`sqflite_common_ffi` — including both schema migrations, the only part of this
+codebase that can destroy history a user already has and the only part that
+never runs during ordinary development.
 
 ### Android permissions & manifest
 
-These need to already be present in `android/app/src/main/AndroidManifest.xml`
-(all were added incrementally — if you're setting this up fresh on another
-machine, check they're all there):
+In `android/app/src/main/AndroidManifest.xml`:
 
 ```xml
 <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
 <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-<uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE_HEALTH" />
 <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 ```
 
-And, inside `<application>`, an override on the background service plugin's
-own service declaration (required on Android 14+, which enforces explicit
-foreground service types):
+And inside `<application>`, an override on the plugin's own service
+declaration — Android 14+ requires an explicit foreground service type:
 
 ```xml
 <service
     android:name="id.flutter.flutter_background_service.BackgroundService"
-    android:foregroundServiceType="dataSync"
+    android:foregroundServiceType="health"
     tools:replace="android:exported" />
 ```
 
-(`tools:replace` requires `xmlns:tools="http://schemas.android.com/tools"`
-on the root `<manifest>` tag.)
+`tools:replace` needs `xmlns:tools="http://schemas.android.com/tools"` on the
+root `<manifest>` tag.
+
+**The type must be `health`.** Android refuses to start a `dataSync` foreground
+service from `BOOT_COMPLETED`, and throws rather than declining: the service
+dies in `onCreate` before Flutter starts, the plugin's watchdog restarts it
+into the same wall, and the OS shows "Roamfree keeps stopping" with nothing in
+logcat. It only fires on boot-initiated starts, so opening the app by hand
+always looks fine. The same type is set in `AndroidConfiguration` so the two
+can't drift apart.
 
 ### App icon
 
-Regenerated via `flutter_launcher_icons` from `assets/icon/icon.png`, with
-an explicit adaptive-icon foreground/background split (a flat square logo
-without one gets auto-shrunk by Android's adaptive icon masking). Config
-lives in `pubspec.yaml` under the `flutter_launcher_icons:` key. Re-run with:
-
-```
-dart run flutter_launcher_icons
-```
+`dart run flutter_launcher_icons`, configured in `pubspec.yaml`. The adaptive
+foreground/background split is deliberate — a flat square logo without one gets
+shrunk by Android's icon masking.
 
 ## Building a release
 
-Signed releases use a real keystore, not Flutter's debug key — required for
-Android to treat successive builds as updates-in-place (preserving a
-tester's step history) rather than forcing an uninstall each time.
+Releases are signed with a real keystore rather than Flutter's debug key, so
+Android treats successive builds as in-place updates and testers keep their
+history. Credentials live in `android/key.properties`, **not committed** —
+without it `build.gradle.kts` falls back to debug signing and silently breaks
+updates for anyone who already has the app installed.
 
-1. `android/key.properties` holds the keystore credentials — **not
-   committed** (see `.gitignore`). Without it, `build.gradle.kts` silently
-   falls back to debug signing, which breaks in-place updates for anyone
-   who already has the app installed.
-2. Cut a release with:
-   ```
-   ./scripts/release.sh
-   ```
-   This auto-increments both the build number (`android/build_number.txt`)
-   and the patch version (`android/version_name.txt`) on every successful
-   build, and outputs a uniquely-named APK per version (e.g.
-   `version0.0.3.apk`) to `build/app/outputs/flutter-apk/`, rather than
-   overwriting the same file each time.
-3. Both counter files **are** committed — they're shared state, not
-   secrets, so everyone releasing from this repo stays in sync.
+```
+./scripts/release.sh [patch|minor|major]
+```
 
-Testers install by tapping the APK directly (no Play Store). As long as the
-signing key and `applicationId` stay consistent between builds, installing a
-new one updates in place and preserves their data.
+It runs `flutter analyze` and `flutter test` first and stops on either. A
+release goes straight onto testers' phones with no store review, so this is the
+only gate there is, and it fails before the build, before the counters advance
+and before anything is pushed.
+
+On success it advances `android/next_build_number.txt` and
+`android/next_version_name.txt`, writes the released version back to
+`pubspec.yaml`, and produces a per-version APK (`roamfree_0.3.0.apk`) instead
+of overwriting one file. The counter files hold the *next* version and are
+committed, so everyone releasing stays in sync.
+
+The release commit stages those three files by name and never `git add .` —
+that swept whatever was untracked into release commits, which is how a Gradle
+report ended up in the repo.
+
+Testers install the APK directly. As long as the signing key and
+`applicationId` stay consistent, it updates in place and preserves their data.
 
 ## Known limitations
 
-- **iOS is unbuilt and untested.** Everything above is Android-specific.
-- **First launch requires manually opening the app once.** Android puts
+- **iOS is unbuilt and untested.**
+- **First launch needs the app opened by hand once.** Android holds
   freshly-installed apps in a "stopped" state that blocks the boot-completed
-  broadcast (and therefore auto-start) until the user opens the app by hand
-  at least once. After that, auto-start-on-boot works normally on
-  subsequent reboots.
-- **Some OEM battery managers (Xiaomi, Huawei, Oppo, Vivo, Samsung, OnePlus)
-  kill background services more aggressively than stock Android allows.**
-  If a tester on one of these reports steps silently stopping overnight
-  despite everything here being correctly configured, it's very likely an
-  OEM-specific battery whitelist setting on their end, not an app bug.
-- **Steps taken with the screen off for extended periods may arrive in a
-  batch** rather than in real time, due to how the hardware step sensor
-  buffers data while the CPU sleeps — the background service processes and
-  persists them as soon as the next reading arrives, but there can be a
-  short visible lag.
+  broadcast until then. Auto-start works normally on later reboots.
+- **Some OEM battery managers** (Xiaomi, Huawei, Oppo, Vivo, Samsung, OnePlus)
+  kill background services more aggressively than stock Android. A tester
+  reporting steps that stop overnight, with everything here configured
+  correctly, is almost certainly hitting a battery whitelist rather than a bug.
+- **Screen-off steps arrive in batches**, because the sensor buffers readings
+  while the CPU sleeps. They are counted in full — the reading that delivers a
+  batch carries all of it — but the display and notification lag until it
+  lands.
+- **An unclean reboot can lose up to ten seconds of steps.** Database writes
+  are buffered and flushed on a timer; an ordinary kill costs nothing, since
+  the next reading recomputes the total from the baseline, but a reboot
+  re-derives the baseline *from* the stored total. Tune `flushInterval` in
+  `ThrottledStepStore` to trade writes for precision.
