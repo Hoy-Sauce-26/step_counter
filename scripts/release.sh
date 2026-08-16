@@ -49,9 +49,6 @@ echo $((BUILD_NUMBER + 1)) > "$BUILD_NUMBER_FILE"
 
 echo "${MAJOR}.${MINOR}.$((PATCH + 1))" > "$VERSION_NAME_FILE"
 
-# Only the counter files. A blanket `git add .` here swept whatever happened
-# to be untracked at release time into the release commit, which is how a
-# Gradle report ended up in the repo.
 git add "$BUILD_NUMBER_FILE" "$VERSION_NAME_FILE"
 git commit -m "Released version $VERSION_NAME"
 git push --set-upstream origin "$(git rev-parse --abbrev-ref HEAD)"
