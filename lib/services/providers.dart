@@ -262,6 +262,9 @@ class ActiveRouteNotifier extends Notifier<ActiveRoute?> {
   }
 
   Future<void> startRoute(int routeId, String routeName) async {
+    // Drop any count left over from the previous route, so this one's first
+    // subscriber isn't replayed the last walk's total.
+    ref.read(pedometerServiceProvider).clearActiveRouteSteps();
     final startTime = DateTime.now();
     state = ActiveRoute(
       routeId: routeId,
@@ -281,6 +284,7 @@ class ActiveRouteNotifier extends Notifier<ActiveRoute?> {
 
   Future<void> stopRoute() async {
     state = null;
+    ref.read(pedometerServiceProvider).clearActiveRouteSteps();
     await ref.read(preferencesServiceProvider).clearActiveRoute();
     FlutterBackgroundService().invoke('stopRoute');
   }

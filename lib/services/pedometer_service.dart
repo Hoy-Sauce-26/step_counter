@@ -31,14 +31,32 @@ class PedometerService {
   bool _starting = false;
   int? _lastKnownRawSteps;
   bool? _sensorAvailable;
+  int? _activeRouteSteps;
 
   Stream<int> get todayStepsStream => _controller.stream;
 
   Stream<String> get walkingStatusStream => _statusController.stream;
 
-  /// Live active-route step count, relayed from the background service's
-  /// `'routeUpdate'` broadcast.
-  Stream<int> get activeRouteStepsStream => _routeStepsController.stream;
+  /// Live active-route step count
+  Stream<int> get activeRouteStepsStream => Stream<int>.multi((controller) {
+        final known = _activeRouteSteps;
+        if (known != null) controller.add(known);
+        final subscription = _routeStepsController.stream.listen(
+          controller.add,
+          onError: controller.addError,
+          onDone: controller.close,
+        );
+        controller.onCancel = subscription.cancel;
+      });
+
+  void _setActiveRouteSteps(int steps) {
+    _activeRouteSteps = steps;
+    _routeStepsController.add(steps);
+  }
+
+  /// Forgets the cached count so the next route can't replay this one's
+  /// total to its first subscriber.
+  void clearActiveRouteSteps() => _activeRouteSteps = null;
 
   /// [Stream.multi] rather than an `async*` generator because a generator's
   /// body doesn't run until a microtask after `listen()` — long enough to
@@ -130,8 +148,7 @@ class PedometerService {
 
       _bgRouteSubscription = service.on('routeUpdate').listen((event) {
         if (event == null) return;
-        final steps = event['steps'] as int? ?? 0;
-        _routeStepsController.add(steps);
+        _setActiveRouteSteps(event['steps'] as int? ?? 0);
       });
 
       _bgSensorStatusSubscription = service.on('sensorStatus').listen((event) {
@@ -139,6 +156,14 @@ class PedometerService {
         final available = event['available'] as bool?;
         if (available != null) setSensorAvailable(available);
       });
+
+      // A route in progress across an app restart has no live broadcast to
+      // catch up on — the service only emits on a reading.
+      final savedRoute = await _prefsService.getActiveRoute();
+      final savedRouteSteps = savedRoute?['steps'] as int?;
+      if (savedRouteSteps != null && _activeRouteSteps == null) {
+        _setActiveRouteSteps(savedRouteSteps);
+      }
 
       final knownAvailable = await _prefsService.getStepSensorAvailable();
       if (knownAvailable != null && _sensorAvailable == null) {
