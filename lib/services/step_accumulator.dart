@@ -86,9 +86,7 @@ class StepAccumulator {
       // A new day's — or a re-baselined day's — running totals no longer line
       // up with what came before.
       _lastDisplaySteps = null;
-      // Recovered rather than forgotten: on a mid-day restart this is what
-      // the resumed hour needs to work out how much of the next reading is
-      // actually new.
+      // Needed for a mid-day restart.
       _lastSensorSteps = storedSensorSteps;
       _trackedHourKey = null;
     }
