@@ -27,7 +27,7 @@ charging for it.
 - **Hourly breakdown**: tap a day in the 7-day chart for its hour-by-hour
   distribution.
 - **Saved routes**: name a walk, track it live in the notification, and keep a
-  running average of what it costs you. A route can be cancelled without
+  running average of its total steps. A route can be canceled without
   recording a session, or logged to today after the fact when you walked it
   without tracking.
 - **Personalization**: height and weight sharpen the distance and calorie
