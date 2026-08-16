@@ -3,6 +3,7 @@ import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../services/metrics.dart';
+import '../services/pedometer_service.dart';
 import '../services/providers.dart';
 import '../widgets/calibration_dialog.dart';
 import '../widgets/charts/weekly_bar_chart.dart';
@@ -22,8 +23,10 @@ class HomePage extends ConsumerStatefulWidget {
 
 class _HomePageState extends ConsumerState<HomePage>
     with WidgetsBindingObserver {
-  bool _permissionChecked = false;
-  bool _permissionGranted = false;
+  /// Null until the first check completes.
+  StepPermissionStatus? _permission;
+
+  bool get _permissionGranted => _permission == StepPermissionStatus.granted;
 
   @override
   void initState() {
@@ -45,6 +48,9 @@ class _HomePageState extends ConsumerState<HomePage>
       // doesn't leave yesterday's total on screen until the next step.
       ref.read(pedometerServiceProvider).refreshForCurrentDate();
 
+      // Without this the denied screen stays up until the app is restarted.
+      _refreshPermissionStatus();
+
       // Restart the background service if something killed it (OEM
       // battery manager, etc.) instead of tracking staying off silently.
       _ensureBackgroundServiceRunning();
@@ -62,23 +68,70 @@ class _HomePageState extends ConsumerState<HomePage>
 
   Future<void> _ensurePermission() async {
     final service = ref.read(pedometerServiceProvider);
-    var granted = await service.hasPermission();
-    if (!granted) {
-      granted = await service.requestPermission();
+    var status = await service.permissionStatus();
+    if (status != StepPermissionStatus.granted) {
+      status = await service.requestPermission();
     }
-    if (mounted) {
-      setState(() {
-        _permissionChecked = true;
-        _permissionGranted = granted;
-      });
+    await _applyPermissionStatus(status);
+  }
+
+  /// Re-reads the status without prompting. Called on resume, so returning
+  /// from the settings page takes effect immediately.
+  Future<void> _refreshPermissionStatus() async {
+    final status = await ref.read(pedometerServiceProvider).permissionStatus();
+    if (status == _permission) return;
+    await _applyPermissionStatus(status);
+  }
+
+  Future<void> _applyPermissionStatus(StepPermissionStatus status) async {
+    if (!mounted) return;
+    setState(() => _permission = status);
+    if (status != StepPermissionStatus.granted) return;
+
+    // service.start() already ran once on first build, before permission was
+    // granted, so it bailed out.
+    await ref.read(pedometerServiceProvider).start();
+    await _ensureBackgroundServiceRunning();
+  }
+
+  Future<void> _openPermissionSettings() async {
+    await ref.read(pedometerServiceProvider).openPermissionSettings();
+  }
+
+  Widget _body({
+    required AsyncValue<int> stepsAsync,
+    required int target,
+    required String? walkingStatus,
+    required double? heightCm,
+    required double? weightKg,
+    required UnitSystem unitSystem,
+    required bool? sensorAvailable,
+  }) {
+    switch (_permission) {
+      case null:
+        return const Center(child: CircularProgressIndicator());
+      case StepPermissionStatus.permanentlyDenied:
+        return _PermissionBlocked(onOpenSettings: _openPermissionSettings);
+      case StepPermissionStatus.denied:
+        return _PermissionDenied(onRetry: _ensurePermission);
+      case StepPermissionStatus.granted:
+        break;
     }
-    if (granted) {
-      // service.start() already ran once on first build, before
-      // permission was granted, so it bailed out. Retry — it's a no-op
-      // if it already succeeded.
-      await service.start();
-      await _ensureBackgroundServiceRunning();
-    }
+
+    if (sensorAvailable == false) return const _SensorUnavailable();
+
+    return stepsAsync.when(
+      data: (steps) => _StepContent(
+        steps: steps,
+        target: target,
+        walkingStatus: walkingStatus,
+        heightCm: heightCm,
+        weightKg: weightKg,
+        unitSystem: unitSystem,
+      ),
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (err, st) => Center(child: Text('Sensor error: $err')),
+    );
   }
 
   @override
@@ -158,27 +211,15 @@ class _HomePageState extends ConsumerState<HomePage>
         ],
       ),
       body: SafeArea(
-        child: !_permissionChecked
-            ? const Center(child: CircularProgressIndicator())
-            : !_permissionGranted
-                ? _PermissionDenied(onRetry: _ensurePermission)
-                : sensorAvailable == false
-                ? const _SensorUnavailable()
-                : stepsAsync.when(
-                    data: (steps) => _StepContent(
-                      steps: steps,
-                      target: target,
-                      walkingStatus: walkingStatus,
-                      heightCm: heightCm,
-                      weightKg: weightKg,
-                      unitSystem: unitSystem,
-                    ),
-                    loading: () =>
-                        const Center(child: CircularProgressIndicator()),
-                    error: (err, st) => Center(
-                      child: Text('Sensor error: $err'),
-                    ),
-                  ),
+        child: _body(
+          stepsAsync: stepsAsync,
+          target: target,
+          walkingStatus: walkingStatus,
+          heightCm: heightCm,
+          weightKg: weightKg,
+          unitSystem: unitSystem,
+          sensorAvailable: sensorAvailable,
+        ),
       ),
     );
   }
@@ -297,6 +338,40 @@ class _SensorUnavailable extends StatelessWidget {
               "This device doesn't have a step-count sensor, so live "
               "tracking isn't available.",
               textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Shown when the permission is permanently denied.
+class _PermissionBlocked extends StatelessWidget {
+  final VoidCallback onOpenSettings;
+
+  const _PermissionBlocked({required this.onOpenSettings});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.directions_walk, size: 48),
+            const SizedBox(height: 16),
+            const Text(
+              'Activity permission is turned off, and Android won\'t ask '
+              'again. Turn on Physical activity in Settings to start '
+              'counting steps.',
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 16),
+            FilledButton(
+              onPressed: onOpenSettings,
+              child: const Text('Open settings'),
             ),
           ],
         ),
