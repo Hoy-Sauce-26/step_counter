@@ -139,6 +139,40 @@ void main() {
 
       expect(reading.hourlySteps, 400);
     });
+
+    test('each day gets its own hourly buckets', () async {
+      await accumulator.record(1000, DateTime(2026, 8, 16, 9));
+      await accumulator.record(1500, DateTime(2026, 8, 16, 9));
+
+      await accumulator.record(1600, DateTime(2026, 8, 17, 9));
+      final reading = await accumulator.record(1700, DateTime(2026, 8, 17, 9));
+
+      expect(reading.hourlySteps, 100, reason: 'the new day starts its own 9am');
+      expect(store.hourly['2026-08-16@9'], 500, reason: 'yesterday 9am holds');
+    });
+  });
+
+  group('recalibration', () {
+    // Changing the factor rescales the whole day, not just the steps taken
+    // after it. That is the intent — the factor says the sensor has been
+    // over- or under-reporting all along — but it does mean the displayed
+    // total can move without anyone walking, so it is worth pinning.
+    test('a new correction factor restates the day retroactively', () async {
+      await accumulator.record(1000, day1);
+      expect((await accumulator.record(1500, day1)).displaySteps, 500);
+
+      accumulator.correctionFactor = 0.9;
+
+      expect((await accumulator.record(1500, day1)).displaySteps, 450);
+    });
+
+    test('a factor set mid-day survives into the next reading', () async {
+      await accumulator.record(1000, day1);
+      accumulator.correctionFactor = 0.5;
+
+      expect((await accumulator.record(1200, day1)).displaySteps, 100);
+      expect((await accumulator.record(1400, day1)).displaySteps, 200);
+    });
   });
 
   group('manual credits', () {
