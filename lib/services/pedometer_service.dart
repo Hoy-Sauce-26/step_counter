@@ -37,11 +37,7 @@ class PedometerService {
 
   Stream<String> get walkingStatusStream => _statusController.stream;
 
-  /// Live active-route step count, relayed from the background service's
-  /// `'routeUpdate'` broadcast. Replays the last known count and is seeded
-  /// from the stored route in [start]: the figure committed to the route's
-  /// history when the walk ends is read from here, so presenting zero after
-  /// an app restart would write a zero-step session and skew the average.
+  /// Live active-route step count
   Stream<int> get activeRouteStepsStream => Stream<int>.multi((controller) {
         final known = _activeRouteSteps;
         if (known != null) controller.add(known);

@@ -365,22 +365,7 @@ class RouteProgress {
 /// Advances a route's counters for one reading.
 ///
 /// A reading below the previous one means the hardware counter restarted — a
-/// reboot, which also kills the service isolate. The route's banked total
-/// carries across and a fresh segment starts from here. Without that the
-/// delta clamps to zero for the remainder of the walk, and because the figure
-/// written to the route's history is this one, the session recorded at the
-/// end would drag the route's stored average down permanently.
-///
-/// Detection compares against [lastRaw] rather than [rawBaseline]: the first
-/// reset drops the baseline to whatever the counter read at the time, which
-/// is typically zero, and nothing is ever below zero. A second reboot in the
-/// same walk would then go unnoticed and lose the segment between them.
-/// [rawBaseline] is still checked for the first reading after a restart,
-/// where no previous reading survived.
-///
-/// The correction factor applies to a whole segment rather than to each
-/// reading: rounding per reading drifts badly across a route's worth of
-/// single-step events.
+/// reboot, which also kills the service isolate.
 @visibleForTesting
 RouteProgress resolveRouteProgress({
   required int rawCumulative,
