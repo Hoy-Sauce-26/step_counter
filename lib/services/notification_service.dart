@@ -110,6 +110,33 @@ class NotificationService {
     );
   }
 
+  static Future<void> showSensorUnavailableNotification() async {
+    final androidDetails = AndroidNotificationDetails(
+      'step_counter_channel',
+      'Step Counter Updates',
+      channelDescription: 'Ongoing daily step counter notification',
+      importance: Importance.low,
+      priority: Priority.low,
+      ongoing: true,
+      autoCancel: false,
+      onlyAlertOnce: true,
+      playSound: false,
+      icon: '@mipmap/ic_launcher',
+    );
+
+    final notificationDetails = NotificationDetails(
+      android: androidDetails,
+      iOS: const DarwinNotificationDetails(),
+    );
+
+    await _notificationsPlugin.show(
+      id: _stepNotificationId,
+      title: 'Step tracking unavailable',
+      body: "This device doesn't have a step-count sensor.",
+      notificationDetails: notificationDetails,
+    );
+  }
+
   static String _formatElapsed(Duration d) {
     final h = d.inHours;
     final m = d.inMinutes % 60;

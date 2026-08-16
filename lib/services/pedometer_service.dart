@@ -14,7 +14,9 @@ class PedometerService {
   StreamSubscription<dynamic>? _bgStepSubscription;
   StreamSubscription<dynamic>? _bgRawSubscription;
   StreamSubscription<dynamic>? _bgRouteSubscription;
+  StreamSubscription<dynamic>? _bgSensorStatusSubscription;
   final _controller = StreamController<int>.broadcast();
+  final _sensorAvailableController = StreamController<bool>.broadcast();
   final _statusController = StreamController<String>.broadcast();
   final _rawCumulativeController = StreamController<int>.broadcast();
   final _routeStepsController = StreamController<int>.broadcast();
@@ -23,6 +25,7 @@ class PedometerService {
 
   bool _starting = false;
   int? _lastKnownRawSteps;
+  bool? _sensorAvailable;
 
   Stream<int> get todayStepsStream => _controller.stream;
 
@@ -31,6 +34,30 @@ class PedometerService {
   /// Live active-route step count, relayed from the background service's
   /// `'routeUpdate'` broadcast.
   Stream<int> get activeRouteStepsStream => _routeStepsController.stream;
+
+  /// [Stream.multi] rather than an `async*` generator because a generator's
+  /// body doesn't run until a microtask after `listen()` — long enough to
+  /// read a stale value and to drop reports arriving in between.
+  Stream<bool> get sensorAvailableStream => Stream<bool>.multi((controller) {
+        final known = _sensorAvailable;
+        if (known != null) controller.add(known);
+        final subscription = _sensorAvailableController.stream.listen(
+          controller.add,
+          onError: controller.addError,
+          onDone: controller.close,
+        );
+        controller.onCancel = subscription.cancel;
+      });
+
+  /// Records a sensor report. Visible for testing because the real callers
+  /// — the background-service broadcast and the persisted seed — both live
+  /// inside [start], which needs platform channels a unit test can't give it.
+  @visibleForTesting
+  void setSensorAvailable(bool available) {
+    if (_sensorAvailable == available) return;
+    _sensorAvailable = available;
+    _sensorAvailableController.add(available);
+  }
 
   Future<bool> requestPermission() async {
     final status = await Permission.activityRecognition.request();
@@ -79,6 +106,17 @@ class PedometerService {
       final steps = event['steps'] as int? ?? 0;
       _routeStepsController.add(steps);
     });
+
+    _bgSensorStatusSubscription = service.on('sensorStatus').listen((event) {
+      if (event == null) return;
+      final available = event['available'] as bool?;
+      if (available != null) setSensorAvailable(available);
+    });
+
+    final knownAvailable = await _prefsService.getStepSensorAvailable();
+    if (knownAvailable != null && _sensorAvailable == null) {
+      setSensorAvailable(knownAvailable);
+    }
 
     _statusSubscription = Pedometer.pedestrianStatusStream.listen(
       (status) {
@@ -129,6 +167,8 @@ class PedometerService {
     _bgRawSubscription = null;
     _bgRouteSubscription?.cancel();
     _bgRouteSubscription = null;
+    _bgSensorStatusSubscription?.cancel();
+    _bgSensorStatusSubscription = null;
     _statusSubscription?.cancel();
     _statusSubscription = null;
   }
@@ -139,6 +179,7 @@ class PedometerService {
     _statusController.close();
     _rawCumulativeController.close();
     _routeStepsController.close();
+    _sensorAvailableController.close();
   }
 
   StreamSubscription<int> startCalibrationTest(

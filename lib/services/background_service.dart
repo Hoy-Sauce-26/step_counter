@@ -137,10 +137,22 @@ void onServiceStart(ServiceInstance service) async {
     () => activeRoute != null,
   );
 
+  bool sensorStatusRecorded = false;
+  Future<void> recordSensorStatus(bool available) async {
+    if (sensorStatusRecorded) return;
+    sensorStatusRecorded = true;
+    await prefsService.setStepSensorAvailable(available);
+    service.invoke('sensorStatus', {'available': available});
+    if (!available) {
+      await NotificationService.showSensorUnavailableNotification();
+    }
+  }
+
   Pedometer.stepCountStream.listen((event) async {
     final now = DateTime.now();
     final today = _todayString();
     lastKnownRawSteps = event.steps;
+    await recordSensorStatus(true);
 
     // A reading below the baseline means the hardware counter restarted —
     // it counts from the last boot, so a reboot zeroes it.
@@ -220,6 +232,9 @@ void onServiceStart(ServiceInstance service) async {
 
     service.invoke('stepUpdate', {'steps': todaySteps, 'target': dailyTarget});
     service.invoke('rawStep', {'raw': event.steps});
+  }, onError: (Object error) async {
+    // Need this handler here for devices with no step sensor.
+    await recordSensorStatus(false);
   });
 }
 

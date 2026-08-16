@@ -24,11 +24,16 @@ final databaseHelperProvider = Provider<DatabaseHelper>((ref) {
 });
 
 /// Live "steps taken today" stream, sourced from the pedometer service.
-/// A value of -1 signals the sensor is unavailable.
 final todayStepsProvider = StreamProvider<int>((ref) {
   final service = ref.watch(pedometerServiceProvider);
   service.start();
   return service.todayStepsStream;
+});
+
+final stepSensorAvailableProvider = StreamProvider<bool>((ref) {
+  final service = ref.watch(pedometerServiceProvider);
+  service.start();
+  return service.sensorAvailableStream;
 });
 
 /// 'walking' / 'stopped' / 'unknown' — no UI consumer right now, but keep
