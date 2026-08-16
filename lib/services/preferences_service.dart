@@ -14,6 +14,12 @@ class PreferencesService {
   /// 1.0 = trust the sensor as-is; e.g. 0.93 scales readings down 7%.
   static const double defaultCorrectionFactor = 1.0;
 
+  /// How far the sensor may be corrected in either direction. Both the slider
+  /// and the guided test clamp to this, and they must agree — a test that can
+  /// suggest a factor the slider cannot represent would silently round it.
+  static const double minCorrectionFactor = 0.9;
+  static const double maxCorrectionFactor = 1.1;
+
   Future<int> getDailyTarget() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getInt(_dailyTargetKey) ?? defaultDailyTarget;

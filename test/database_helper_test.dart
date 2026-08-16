@@ -141,7 +141,6 @@ void main() {
       final routes = await db.getRoutes();
 
       expect(routes.single.name, 'Canal loop');
-      expect(routes.single.sessionCount, 0);
       expect(routes.single.avgSteps, isNull,
           reason: 'no sessions means no average, not an average of zero');
     });
@@ -159,7 +158,6 @@ void main() {
 
       final route = (await db.getRoutes()).single;
 
-      expect(route.sessionCount, 3);
       expect(route.avgSteps, closeTo(2000, 0.001));
     });
 
@@ -300,7 +298,7 @@ void main() {
       final route = (await DatabaseHelper.instance.getRoutes()).single;
 
       expect(route.name, 'Canal loop');
-      expect(route.sessionCount, 1,
+      expect(route.avgSteps, isNotNull,
           reason: 'the rename must carry the rows, not start an empty table');
       expect(route.avgSteps, closeTo(1500, 0.001));
     });

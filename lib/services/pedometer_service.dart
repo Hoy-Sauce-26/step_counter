@@ -6,7 +6,7 @@ import 'package:pedometer/pedometer.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import 'database_helper.dart';
-import 'notification_service.dart';
+import 'formatting.dart';
 import 'preferences_service.dart';
 
 /// The three permission outcomes the UI has to tell apart. [denied] can be
@@ -126,7 +126,7 @@ class PedometerService {
         return;
       }
 
-      final today = _todayString();
+      final today = todayKey();
       final existing = await _dbHelper.getStepsForDate(today);
       _controller.add(existing?.stepCount ?? 0);
 
@@ -189,7 +189,7 @@ class PedometerService {
   /// Re-seeds the displayed count from storage on resume, so a date rollover
   /// while the app was away doesn't ever leave yesterday's total on screen.
   Future<void> refreshForCurrentDate() async {
-    final today = _todayString();
+    final today = todayKey();
     final existing = await _dbHelper.getStepsForDate(today);
     if (_liveStepsDate == today) return;
     _controller.add(existing?.stepCount ?? 0);
@@ -210,16 +210,6 @@ class PedometerService {
     await _prefsService.setDailyTarget(target);
     // Same reason as setCorrectionFactor
     FlutterBackgroundService().invoke('setDailyTarget', {'target': target});
-  }
-
-  Future<void> refreshNotificationWithTarget(
-    int target,
-    int currSteps,
-  ) async {
-    await NotificationService.updateStepNotification(
-      steps: currSteps,
-      target: target,
-    );
   }
 
   void stop() {
@@ -257,10 +247,4 @@ class PedometerService {
     });
   }
 
-  String _todayString() {
-    final now = DateTime.now();
-    return '${now.year.toString().padLeft(4, '0')}-'
-        '${now.month.toString().padLeft(2, '0')}-'
-        '${now.day.toString().padLeft(2, '0')}';
-  }
 }

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import '../models/daily_steps.dart';
+import 'formatting.dart';
 import 'database_helper.dart';
 import 'preferences_service.dart';
 
@@ -199,14 +200,6 @@ int resolveBaselineValue({
   final rawExistingDelta =
       correctionFactor == 0 ? 0 : (existingSteps / correctionFactor).round();
   return rawCumulative - rawExistingDelta;
-}
-
-/// Local date as `yyyy-MM-dd`. Deliberately not UTC: a day rolls over when it
-/// does for the person walking, not at midnight in Greenwich.
-String dateKey(DateTime moment) {
-  return '${moment.year.toString().padLeft(4, '0')}-'
-      '${moment.month.toString().padLeft(2, '0')}-'
-      '${moment.day.toString().padLeft(2, '0')}';
 }
 
 class ThrottledStepStore implements StepStore {

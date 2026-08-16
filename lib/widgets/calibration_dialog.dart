@@ -1,10 +1,9 @@
 import 'package:flutter/material.dart';
+import '../services/preferences_service.dart';
 
 import '../services/pedometer_service.dart';
 import 'calibration_test_dialog.dart';
 
-const _calibrationMin = 0.9;
-const _calibrationMax = 1.1;
 
 /// Shows a dialog to calibrate the step sensor's known over/under-counting.
 /// [currentFactor] and the return value are both fractions (1.0 = 100%,
@@ -14,7 +13,7 @@ Future<double?> showCalibrationDialog(
   double currentFactor,
   PedometerService pedometerService,
 ) {
-  var factor = currentFactor.clamp(_calibrationMin, _calibrationMax);
+  var factor = currentFactor.clamp(PreferencesService.minCorrectionFactor, PreferencesService.maxCorrectionFactor);
 
   return showDialog<double>(
     context: context,
@@ -37,10 +36,10 @@ Future<double?> showCalibrationDialog(
                   children: [
                     Expanded(
                       child: Slider(
-                        min: _calibrationMin,
-                        max: _calibrationMax,
+                        min: PreferencesService.minCorrectionFactor,
+                        max: PreferencesService.maxCorrectionFactor,
                         divisions: 40,
-                        value: factor.clamp(_calibrationMin, _calibrationMax),
+                        value: factor.clamp(PreferencesService.minCorrectionFactor, PreferencesService.maxCorrectionFactor),
                         label: '${(factor * 100).round()}%',
                         onChanged: (v) => setState(() => factor = v),
                       ),

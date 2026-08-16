@@ -1,4 +1,5 @@
 import 'dart:async';
+import '../services/preferences_service.dart';
 
 import 'package:flutter/material.dart';
 
@@ -6,8 +7,6 @@ import '../services/pedometer_service.dart';
 
 const _targetSteps = 100;
 const _minStepsToFinish = 20;
-const _calibrationMin = 0.9;
-const _calibrationMax = 1.1;
 
 /// Guided calibration test: tap Start, walk ~100 steps, tap Done.
 /// Compares the raw count to 100 and suggests a factor, clamped to the
@@ -55,7 +54,7 @@ class _CalibrationTestDialogState extends State<_CalibrationTestDialog> {
   }
 
   double get _suggestedFactor =>
-      (_targetSteps / _rawSteps).clamp(_calibrationMin, _calibrationMax);
+      (_targetSteps / _rawSteps).clamp(PreferencesService.minCorrectionFactor, PreferencesService.maxCorrectionFactor);
 
   void _finish() {
     _subscription?.cancel();

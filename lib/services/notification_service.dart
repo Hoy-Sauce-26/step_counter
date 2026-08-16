@@ -1,6 +1,20 @@
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
+import 'formatting.dart';
+
 class NotificationService {
+  /// The channel id is a durable identifier: users' per-channel settings hang
+  /// off it, so changing it orphans their choices and quietly creates a second
+  /// channel. The name is display text and is safe to change.
+  static const String channelId = 'step_counter_channel';
+  static const String channelName = 'Step tracking';
+  static const String channelDescription =
+      'Ongoing daily step counter notification';
+
+  /// One id for one ongoing notification — the foreground service's and this
+  /// service's must match, or the service's placeholder never gets replaced.
+  static const int notificationId = 888;
+
   static final FlutterLocalNotificationsPlugin _notificationsPlugin =
   FlutterLocalNotificationsPlugin();
 
@@ -23,9 +37,9 @@ class NotificationService {
 
     if (androidPlugin != null) {
       const AndroidNotificationChannel channel = AndroidNotificationChannel(
-        'step_counter_channel',
-        'Step tracking',
-        description: 'Ongoing daily step counter notification',
+        channelId,
+        channelName,
+        description: channelDescription,
         importance: Importance.low,
       );
 
@@ -40,8 +54,6 @@ class NotificationService {
     await androidImplementation?.requestNotificationsPermission();
   }
 
-  static const int _stepNotificationId = 888;
-
   static Future<void> updateStepNotification({
     required int steps,
     required int target,
@@ -49,9 +61,9 @@ class NotificationService {
     final double percentage = ((steps / target) * 100).clamp(0, 100);
 
     final AndroidNotificationDetails androidDetails = AndroidNotificationDetails(
-      'step_counter_channel', // Channel ID
-      'Step tracking', // Channel Name
-      channelDescription: 'Ongoing daily step counter notification',
+      channelId,
+      channelName,
+      channelDescription: channelDescription,
       importance: Importance.low, // Keeps it quiet when updating frequently
       priority: Priority.low,
       ongoing: true,
@@ -70,7 +82,7 @@ class NotificationService {
     );
 
     await _notificationsPlugin.show(
-      id: _stepNotificationId,
+      id: notificationId,
       title: 'Today\'s Steps: $steps / $target',
       body: '${percentage.toStringAsFixed(1)}% of your daily goal reached!',
       notificationDetails: notificationDetails,
@@ -85,9 +97,9 @@ class NotificationService {
     required Duration elapsed,
   }) async {
     final androidDetails = AndroidNotificationDetails(
-      'step_counter_channel',
-      'Step tracking',
-      channelDescription: 'Ongoing daily step counter notification',
+      channelId,
+      channelName,
+      channelDescription: channelDescription,
       importance: Importance.low,
       priority: Priority.low,
       ongoing: true,
@@ -103,18 +115,18 @@ class NotificationService {
     );
 
     await _notificationsPlugin.show(
-      id: _stepNotificationId,
+      id: notificationId,
       title: 'On Route: $routeName',
-      body: '$steps steps · ${_formatElapsed(elapsed)}',
+      body: '$steps steps · ${formatDuration(elapsed)}',
       notificationDetails: notificationDetails,
     );
   }
 
   static Future<void> showSensorUnavailableNotification() async {
     final androidDetails = AndroidNotificationDetails(
-      'step_counter_channel',
-      'Step tracking',
-      channelDescription: 'Ongoing daily step counter notification',
+      channelId,
+      channelName,
+      channelDescription: channelDescription,
       importance: Importance.low,
       priority: Priority.low,
       ongoing: true,
@@ -130,19 +142,11 @@ class NotificationService {
     );
 
     await _notificationsPlugin.show(
-      id: _stepNotificationId,
+      id: notificationId,
       title: 'Step tracking unavailable',
       body: "This device doesn't have a step-count sensor.",
       notificationDetails: notificationDetails,
     );
   }
 
-  static String _formatElapsed(Duration d) {
-    final h = d.inHours;
-    final m = d.inMinutes % 60;
-    final s = d.inSeconds % 60;
-    final mStr = m.toString().padLeft(2, '0');
-    final sStr = s.toString().padLeft(2, '0');
-    return h > 0 ? '${h}h ${mStr}m ${sStr}s' : '${m}m ${sStr}s';
-  }
 }
