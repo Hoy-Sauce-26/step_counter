@@ -106,6 +106,12 @@ class PedometerService {
     FlutterBackgroundService().invoke('setCorrectionFactor', {'factor': factor});
   }
 
+  Future<void> setDailyTarget(int target) async {
+    await _prefsService.setDailyTarget(target);
+    // Same reason as setCorrectionFactor
+    FlutterBackgroundService().invoke('setDailyTarget', {'target': target});
+  }
+
   Future<void> refreshNotificationWithTarget(
     int target,
     int currSteps,
