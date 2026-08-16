@@ -9,6 +9,11 @@ import 'database_helper.dart';
 import 'notification_service.dart';
 import 'preferences_service.dart';
 
+/// The three permission outcomes the UI has to tell apart. [denied] can be
+/// retried with a system dialog; [permanentlyDenied] can't — Android silently
+/// no-ops the request, so the only route left is the app's settings page.
+enum StepPermissionStatus { granted, denied, permanentlyDenied }
+
 class PedometerService {
   StreamSubscription<PedestrianStatus>? _statusSubscription;
   StreamSubscription<dynamic>? _bgStepSubscription;
@@ -59,10 +64,29 @@ class PedometerService {
     _sensorAvailableController.add(available);
   }
 
-  Future<bool> requestPermission() async {
-    final status = await Permission.activityRecognition.request();
-    return status.isGranted;
+  Future<StepPermissionStatus> requestPermission() async {
+    return _toStepPermissionStatus(
+      await Permission.activityRecognition.request(),
+    );
   }
+
+  Future<StepPermissionStatus> permissionStatus() async {
+    return _toStepPermissionStatus(
+      await Permission.activityRecognition.status,
+    );
+  }
+
+  StepPermissionStatus _toStepPermissionStatus(PermissionStatus status) {
+    if (status.isGranted) return StepPermissionStatus.granted;
+    if (status.isPermanentlyDenied) {
+      return StepPermissionStatus.permanentlyDenied;
+    }
+    return StepPermissionStatus.denied;
+  }
+
+  /// Opens this app's page in the OS settings — the only way back once a
+  /// permission is permanently denied.
+  Future<bool> openPermissionSettings() => openAppSettings();
 
   Future<bool> hasPermission() async {
     return Permission.activityRecognition.isGranted;
