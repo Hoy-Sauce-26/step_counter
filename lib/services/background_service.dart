@@ -20,6 +20,8 @@ Future<void> initializeBackgroundService() async {
       autoStart: false,
       isForegroundMode: true,
       autoStartOnBoot: true,
+      // Can't a dataSync foreground service from BOOT_COMPLETED
+      foregroundServiceTypes: [AndroidForegroundType.health],
       notificationChannelId: backgroundNotificationChannelId,
       initialNotificationTitle: 'Roamfree',
       initialNotificationContent: 'Starting…',
@@ -36,6 +38,11 @@ void onServiceStart(ServiceInstance service) async {
   DartPluginRegistrant.ensureInitialized();
   await NotificationService.init();
 
+  final prefsService = PreferencesService();
+
+  // Buffered rather than written straight through:
+  final stepStore = ThrottledStepStore(PersistentStepStore());
+
   if (service is AndroidServiceInstance) {
     service.on('setAsForeground').listen((event) {
       service.setAsForegroundService();
@@ -44,16 +51,16 @@ void onServiceStart(ServiceInstance service) async {
       service.setAsBackgroundService();
     });
   }
-  service.on('stopService').listen((event) {
+  service.on('stopService').listen((event) async {
+    // Commit before going away: the flush timer will not get another chance.
+    await stepStore.flush();
     service.stopSelf();
   });
-
-  final prefsService = PreferencesService();
 
   // All day/hour/manual bookkeeping lives here. This isolate keeps no copy of
   // it, so there is nothing to drift out of sync.
   final accumulator = StepAccumulator(
-    PersistentStepStore(),
+    stepStore,
     correctionFactor: await prefsService.getCorrectionFactor(),
   );
 
@@ -124,7 +131,8 @@ void onServiceStart(ServiceInstance service) async {
   service.on('addManualSteps').listen((event) async {
     final amount = event?['steps'] as int?;
     if (amount == null) return;
-    final newTotal = await accumulator.creditManualSteps(amount, DateTime.now());
+    final creditedAt = DateTime.now();
+    final newTotal = await accumulator.creditManualSteps(amount, creditedAt);
     if (newTotal == null) return;
 
     // Push an update rather than waiting for the next real reading.
@@ -134,7 +142,11 @@ void onServiceStart(ServiceInstance service) async {
         target: dailyTarget,
       );
     }
-    service.invoke('stepUpdate', {'steps': newTotal, 'target': dailyTarget});
+    service.invoke('stepUpdate', {
+      'steps': newTotal,
+      'target': dailyTarget,
+      'date': dateKey(creditedAt),
+    });
   });
 
   // Schedule a single midnight timer instead of polling for it (skipped
@@ -205,7 +217,13 @@ void onServiceStart(ServiceInstance service) async {
       );
     }
 
-    service.invoke('stepUpdate', {'steps': displaySteps, 'target': dailyTarget});
+    // The date rides along so the app can tell a live figure from a stored
+    // one when deciding which of the two is current.
+    service.invoke('stepUpdate', {
+      'steps': displaySteps,
+      'target': dailyTarget,
+      'date': reading.date,
+    });
     service.invoke('rawStep', {'raw': event.steps});
   }, onError: (Object error) async {
     // Need this handler here for devices with no step sensor.

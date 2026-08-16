@@ -17,6 +17,7 @@ void main() {
     test('keeps the saved baseline while the sensor is still climbing', () {
       final baseline = resolveBaselineValue(
         rawCumulative: 500100,
+        sensorHasReset: false,
         savedBaseline: 500000,
         existingSteps: 100,
         correctionFactor: 1.0,
@@ -30,7 +31,8 @@ void main() {
       expect(
         resolveBaselineValue(
           rawCumulative: 500000,
-          savedBaseline: 500000,
+          sensorHasReset: false,
+        savedBaseline: 500000,
           existingSteps: 0,
           correctionFactor: 1.0,
         ),
@@ -41,6 +43,7 @@ void main() {
     test('baselines a fresh day to the current raw reading', () {
       final baseline = resolveBaselineValue(
         rawCumulative: 500000,
+        sensorHasReset: false,
         savedBaseline: null,
         existingSteps: 0,
         correctionFactor: 1.0,
@@ -57,6 +60,7 @@ void main() {
     test("a reboot mid-day keeps the day's total and resumes counting", () {
       final baseline = resolveBaselineValue(
         rawCumulative: 0,
+        sensorHasReset: true,
         savedBaseline: 500000,
         existingSteps: 100,
         correctionFactor: 1.0,
@@ -78,6 +82,7 @@ void main() {
     test('a reboot before any steps today baselines to the raw reading', () {
       final baseline = resolveBaselineValue(
         rawCumulative: 5,
+        sensorHasReset: true,
         savedBaseline: 500000,
         existingSteps: 0,
         correctionFactor: 1.0,
@@ -91,6 +96,7 @@ void main() {
       // 90 corrected steps at 0.9 came from 100 raw ones.
       final baseline = resolveBaselineValue(
         rawCumulative: 0,
+        sensorHasReset: true,
         savedBaseline: 500000,
         existingSteps: 90,
         correctionFactor: 0.9,
@@ -111,7 +117,8 @@ void main() {
       expect(
         resolveBaselineValue(
           rawCumulative: 0,
-          savedBaseline: 500000,
+          sensorHasReset: true,
+        savedBaseline: 500000,
           existingSteps: 100,
           correctionFactor: 0,
         ),

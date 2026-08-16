@@ -32,6 +32,7 @@ class PedometerService {
   int? _lastKnownRawSteps;
   bool? _sensorAvailable;
   int? _activeRouteSteps;
+  String? _liveStepsDate;
 
   Stream<int> get todayStepsStream => _controller.stream;
 
@@ -134,6 +135,7 @@ class PedometerService {
       _bgStepSubscription = service.on('stepUpdate').listen((event) {
         if (event == null) return;
         final steps = event['steps'] as int? ?? 0;
+        _liveStepsDate = event['date'] as String?;
         debugPrint('[PedometerService] stepUpdate from background service: '
             '$steps at ${DateTime.now()}');
         _controller.add(steps);
@@ -184,9 +186,12 @@ class PedometerService {
     }
   }
 
+  /// Re-seeds the displayed count from storage on resume, so a date rollover
+  /// while the app was away doesn't ever leave yesterday's total on screen.
   Future<void> refreshForCurrentDate() async {
     final today = _todayString();
     final existing = await _dbHelper.getStepsForDate(today);
+    if (_liveStepsDate == today) return;
     _controller.add(existing?.stepCount ?? 0);
   }
 

@@ -10,6 +10,7 @@ class FakeStepStore implements StepStore {
   final Map<String, int> manual = {};
   final Map<String, int> daily = {};
   final Map<String, int> hourly = {};
+  int? lastRaw;
 
   String _hourKey(String date, int hour) => '$date@$hour';
 
@@ -44,6 +45,12 @@ class FakeStepStore implements StepStore {
   @override
   Future<void> writeHourlySteps(String date, int hour, int steps) async =>
       hourly[_hourKey(date, hour)] = steps;
+
+  @override
+  Future<int?> readLastRaw() async => lastRaw;
+
+  @override
+  Future<void> writeLastRaw(int rawCumulative) async => lastRaw = rawCumulative;
 }
 
 final day1 = DateTime(2026, 8, 16, 9);
@@ -101,6 +108,48 @@ void main() {
       // the reading.
       expect((await accumulator.record(3, day1)).displaySteps, 500);
       expect((await accumulator.record(103, day1)).displaySteps, 600);
+    });
+
+    test('a second reboot on the same day does not revert the day', () async {
+      var session = StepAccumulator(store);
+      await session.record(1000, day1);
+      expect((await session.record(2200, day1)).displaySteps, 1200);
+
+      session = StepAccumulator(store);
+      expect((await session.record(5, day1)).displaySteps, 1200);
+      expect((await session.record(800, day1)).displaySteps, 1995);
+
+      session = StepAccumulator(store);
+
+      expect(
+        (await session.record(3, day1)).displaySteps,
+        1995,
+        reason: 'the steps walked between the two reboots must survive',
+      );
+      expect((await session.record(103, day1)).displaySteps, 2095);
+    });
+
+    test('a reboot is recognised after a restart with nothing in memory',
+        () async {
+      var session = StepAccumulator(store);
+      await session.record(1000, day1);
+      await session.record(1500, day1);
+
+      session = StepAccumulator(store);
+
+      expect((await session.record(4, day1)).displaySteps, 500);
+    });
+
+    test('a reboot across midnight starts the new day at zero', () async {
+      var session = StepAccumulator(store);
+      await session.record(1000, day1);
+      await session.record(1500, day1);
+
+      session = StepAccumulator(store);
+
+      expect((await session.record(6, day2)).displaySteps, 0,
+          reason: "a reset is not yesterday's total carried into today");
+      expect(store.daily['2026-08-16'], 500, reason: 'yesterday still holds');
     });
   });
 
