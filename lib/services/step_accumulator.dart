@@ -3,10 +3,6 @@ import 'database_helper.dart';
 import 'preferences_service.dart';
 
 /// Storage the accumulator depends on.
-///
-/// Deliberately narrow, and deliberately not SharedPreferences or sqflite: a
-/// fake backed by a couple of maps satisfies it, which is what lets the step
-/// accounting be tested without a sensor, a database, or a service isolate.
 abstract class StepStore {
   Future<int?> readBaseline(String date);
   Future<void> writeBaseline(String date, int baseline);
@@ -45,19 +41,6 @@ class StepReading {
   });
 }
 
-/// Turns a stream of raw cumulative sensor readings into daily and hourly
-/// step totals, and folds in steps credited by hand.
-///
-/// The hardware counter reports steps since the device last booted, so every
-/// figure here is a delta against a baseline. Keeping that bookkeeping in one
-/// place — rather than in locals captured by the background service's start
-/// callback — is what makes it reachable from a test.
-///
-/// [correctionFactor] is a plain field rather than something read from
-/// storage. The background service runs in its own isolate with its own
-/// private copy of SharedPreferences, so a value written by the app is
-/// invisible here; the app mirrors changes across explicitly, and having no
-/// storage access at all makes re-reading it impossible by construction.
 class StepAccumulator {
   StepAccumulator(this._store, {this.correctionFactor = 1.0});
 
@@ -82,10 +65,6 @@ class StepAccumulator {
   Future<StepReading> record(int rawCumulative, DateTime now) async {
     final date = dateKey(now);
 
-    // A reading below the baseline means the hardware counter restarted — it
-    // counts from the last boot, so a reboot zeroes it. Re-resolving rebuilds
-    // the baseline around the steps already stored for the day; without it
-    // every later delta clamps to zero and overwrites the day's total.
     final sensorReset = _baseline != null && rawCumulative < _baseline!;
 
     if (_trackedDate != date || sensorReset) {
@@ -111,10 +90,6 @@ class StepAccumulator {
     final hourKey = '$date-$hour';
     if (_trackedHourKey != hourKey) {
       _trackedHourKey = hourKey;
-      // If this hour already has a stored count (the service restarted
-      // mid-hour), resume from it rather than resetting or double counting.
-      // Otherwise start from the previous reading's sensor total, so this
-      // hour's first step shows up right away.
       final existingHour = await _store.readHourlySteps(date, hour);
       _hourStartSensorTotal = existingHour != null
           ? sensorSteps - existingHour
@@ -137,10 +112,6 @@ class StepAccumulator {
     );
   }
 
-  /// Credits [amount] steps to the day containing [now] — a route logged
-  /// without live tracking, say — and returns the day's new total. Returns
-  /// null if [amount] isn't a usable number of steps.
-  ///
   /// The credit lands on the daily total and on no hour: nobody walked these
   /// steps at a particular time, and picking one would make the hourly chart
   /// assert something untrue.
@@ -150,10 +121,7 @@ class StepAccumulator {
 
     if (_trackedDate != date) {
       // A credit can arrive before the day's first reading, while _manualSteps
-      // still holds yesterday's figure. Reload it — but leave _trackedDate
-      // alone. It is what makes the next reading re-resolve the baseline, and
-      // claiming the day is already resolved here would leave yesterday's
-      // baseline in place and fold yesterday's steps into today.
+      // still holds yesterday's figure. Reload it but leave _trackedDate alone.
       _manualSteps = await _store.readManualSteps(date);
       _lastDisplaySteps = null;
       _lastSensorSteps = null;
@@ -164,8 +132,7 @@ class StepAccumulator {
     await _store.writeManualSteps(date, _manualSteps);
 
     // _lastDisplaySteps is null until a reading lands, so fall back to what is
-    // stored rather than to zero — treating "nothing read yet" as "no steps
-    // yet" would overwrite the day's total with just this credit.
+    // stored rather than to zero
     final runningTotal =
         _lastDisplaySteps ?? await _store.readDailySteps(date) ?? 0;
     final newTotal = runningTotal + amount;
@@ -177,9 +144,7 @@ class StepAccumulator {
   Future<int> _resolveBaseline(String date, int rawCumulative) async {
     final existing = await _store.readDailySteps(date) ?? 0;
     // Only the sensor-derived part of the stored total can be turned back
-    // into a raw reading. Manual credits never came from the sensor, so
-    // dividing them by the correction factor would invent raw steps that were
-    // never taken, push the baseline too far back, and count them twice.
+    // into a raw reading.
     final sensorPortion = (existing - _manualSteps).clamp(0, 1 << 30);
 
     final baseline = resolveBaselineValue(
@@ -195,13 +160,6 @@ class StepAccumulator {
 }
 
 /// The raw-sensor value that counts as "zero steps" for a day.
-///
-/// [savedBaseline] is reused as long as the sensor is still above it. A
-/// [rawCumulative] *below* it means the hardware counter reset — it counts
-/// from the last reboot — so the baseline is re-derived from the steps already
-/// stored for the day. That result is deliberately negative (raw restarts near
-/// zero while the day already has steps), which is what keeps the stored total
-/// intact and lets new readings add on top of it.
 int resolveBaselineValue({
   required int rawCumulative,
   required int? savedBaseline,
