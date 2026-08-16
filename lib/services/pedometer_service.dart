@@ -44,7 +44,7 @@ class PedometerService {
   Future<void> start() async {
     if (_bgStepSubscription != null || _starting) return;
     _starting = true;
-    
+
     try {
       final granted = await hasPermission();
       if (!granted) {

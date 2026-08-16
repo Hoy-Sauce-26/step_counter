@@ -8,10 +8,6 @@ import '../models/saved_route.dart';
 import '../services/metrics.dart';
 import '../services/providers.dart';
 
-/// Saved routes: add one, start/stop tracking against it, see a rough step
-/// estimate from past sessions. Shows the live tracking/summary view
-/// instead of the list whenever a route is active, however this page was
-/// reached.
 class RoutesPage extends ConsumerWidget {
   const RoutesPage({super.key});
 
@@ -394,13 +390,22 @@ class _ActiveRouteViewState extends ConsumerState<_ActiveRouteView> {
   }
 
   Future<void> _cancel() async {
+    final db = ref.read(databaseHelperProvider);
+    final isUnused =
+        await db.getSessionCountForRoute(widget.activeRoute.routeId) == 0;
+    if (!mounted) return;
+
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Cancel this route?'),
-        content: const Text(
-          "This route's progress won't be saved, and its average won't "
-          "change — your steps still count toward today's total either way.",
+        content: Text(
+          isUnused
+              ? "This route has no completed sessions yet, so cancelling "
+                  "removes it entirely rather than leaving an empty entry."
+              : "This route's progress won't be saved, and its average "
+                  "won't change — your steps still count toward today's "
+                  "total either way.",
         ),
         actions: [
           TextButton(
@@ -414,11 +419,16 @@ class _ActiveRouteViewState extends ConsumerState<_ActiveRouteView> {
         ],
       ),
     );
+    if (confirmed != true) return;
+
     // No insertRouteSession call — that's the whole point, this route's
     // average stays exactly as it was.
-    if (confirmed == true) {
-      await ref.read(activeRouteProvider.notifier).stopRoute();
+    if (isUnused) {
+      await db.deleteRoute(widget.activeRoute.routeId);
     }
+    // Both of these must happen before stopRoute()
+    ref.invalidate(routesProvider);
+    await ref.read(activeRouteProvider.notifier).stopRoute();
   }
 
   String _todayString() {
