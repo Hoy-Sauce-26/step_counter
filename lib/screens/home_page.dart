@@ -25,6 +25,7 @@ class _HomePageState extends ConsumerState<HomePage>
   bool _permissionChecked = false;
   bool _permissionGranted = false;
   bool _ensuringBackgroundService = false;
+  bool _backgroundServiceFailed = false;
 
   @override
   void initState() {
@@ -60,6 +61,15 @@ class _HomePageState extends ConsumerState<HomePage>
       final isRunning = await bgService.isRunning();
       if (!isRunning) {
         await bgService.startService();
+      }
+      if (mounted && _backgroundServiceFailed) {
+        setState(() => _backgroundServiceFailed = false);
+      }
+    } catch (error, stackTrace) {
+      debugPrint('[HomePage] Failed to start background service: $error\n'
+          '$stackTrace');
+      if (mounted) {
+        setState(() => _backgroundServiceFailed = true);
       }
     } finally {
       _ensuringBackgroundService = false;
@@ -167,20 +177,30 @@ class _HomePageState extends ConsumerState<HomePage>
             ? const Center(child: CircularProgressIndicator())
             : !_permissionGranted
                 ? _PermissionDenied(onRetry: _ensurePermission)
-                : stepsAsync.when(
-                    data: (steps) => _StepContent(
-                      steps: steps,
-                      target: target,
-                      walkingStatus: walkingStatus,
-                      heightCm: heightCm,
-                      weightKg: weightKg,
-                      unitSystem: unitSystem,
-                    ),
-                    loading: () =>
-                        const Center(child: CircularProgressIndicator()),
-                    error: (err, st) => Center(
-                      child: Text('Sensor error: $err'),
-                    ),
+                : Column(
+                    children: [
+                      if (_backgroundServiceFailed)
+                        _BackgroundServiceFailedBanner(
+                          onRetry: _ensureBackgroundServiceRunning,
+                        ),
+                      Expanded(
+                        child: stepsAsync.when(
+                          data: (steps) => _StepContent(
+                            steps: steps,
+                            target: target,
+                            walkingStatus: walkingStatus,
+                            heightCm: heightCm,
+                            weightKg: weightKg,
+                            unitSystem: unitSystem,
+                          ),
+                          loading: () =>
+                              const Center(child: CircularProgressIndicator()),
+                          error: (err, st) => Center(
+                            child: Text('Sensor error: $err'),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
       ),
     );
@@ -291,6 +311,29 @@ class _StepContent extends ConsumerWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _BackgroundServiceFailedBanner extends StatelessWidget {
+  final VoidCallback onRetry;
+
+  const _BackgroundServiceFailedBanner({required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return MaterialBanner(
+      backgroundColor: theme.colorScheme.errorContainer,
+      leading: Icon(Icons.warning_amber, color: theme.colorScheme.onErrorContainer),
+      content: Text(
+        "Step tracking couldn't start — your steps may not be counted "
+        "until this is retried.",
+        style: TextStyle(color: theme.colorScheme.onErrorContainer),
+      ),
+      actions: [
+        TextButton(onPressed: onRetry, child: const Text('Retry')),
+      ],
     );
   }
 }
