@@ -137,7 +137,6 @@ void onServiceStart(ServiceInstance service) async {
     () => activeRoute != null,
   );
 
-  // Whether the sensor's presence has been settled for this service run.
   bool sensorStatusRecorded = false;
   Future<void> recordSensorStatus(bool available) async {
     if (sensorStatusRecorded) return;
@@ -234,7 +233,7 @@ void onServiceStart(ServiceInstance service) async {
     service.invoke('stepUpdate', {'steps': todaySteps, 'target': dailyTarget});
     service.invoke('rawStep', {'raw': event.steps});
   }, onError: (Object error) async {
-    // Need a handler here for devices with no step sensor.
+    // Need this handler here for devices with no step sensor.
     await recordSensorStatus(false);
   });
 }

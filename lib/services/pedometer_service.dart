@@ -35,12 +35,6 @@ class PedometerService {
   /// `'routeUpdate'` broadcast.
   Stream<int> get activeRouteStepsStream => _routeStepsController.stream;
 
-  /// Whether this device has a step-count sensor, as reported by the
-  /// background service — the only place allowed to touch it. Replays the
-  /// last report to each new subscriber, because that report is a single
-  /// event: the service settles the question once and then goes quiet, so a
-  /// subscriber created afterwards would otherwise wait forever.
-  ///
   /// [Stream.multi] rather than an `async*` generator because a generator's
   /// body doesn't run until a microtask after `listen()` — long enough to
   /// read a stale value and to drop reports arriving in between.
