@@ -35,13 +35,31 @@ class PedometerService {
   /// `'routeUpdate'` broadcast.
   Stream<int> get activeRouteStepsStream => _routeStepsController.stream;
 
-  Stream<bool> get sensorAvailableStream async* {
-    final known = _sensorAvailable;
-    if (known != null) yield known;
-    yield* _sensorAvailableController.stream;
-  }
+  /// Whether this device has a step-count sensor, as reported by the
+  /// background service — the only place allowed to touch it. Replays the
+  /// last report to each new subscriber, because that report is a single
+  /// event: the service settles the question once and then goes quiet, so a
+  /// subscriber created afterwards would otherwise wait forever.
+  ///
+  /// [Stream.multi] rather than an `async*` generator because a generator's
+  /// body doesn't run until a microtask after `listen()` — long enough to
+  /// read a stale value and to drop reports arriving in between.
+  Stream<bool> get sensorAvailableStream => Stream<bool>.multi((controller) {
+        final known = _sensorAvailable;
+        if (known != null) controller.add(known);
+        final subscription = _sensorAvailableController.stream.listen(
+          controller.add,
+          onError: controller.addError,
+          onDone: controller.close,
+        );
+        controller.onCancel = subscription.cancel;
+      });
 
-  void _setSensorAvailable(bool available) {
+  /// Records a sensor report. Visible for testing because the real callers
+  /// — the background-service broadcast and the persisted seed — both live
+  /// inside [start], which needs platform channels a unit test can't give it.
+  @visibleForTesting
+  void setSensorAvailable(bool available) {
     if (_sensorAvailable == available) return;
     _sensorAvailable = available;
     _sensorAvailableController.add(available);
@@ -98,12 +116,12 @@ class PedometerService {
     _bgSensorStatusSubscription = service.on('sensorStatus').listen((event) {
       if (event == null) return;
       final available = event['available'] as bool?;
-      if (available != null) _setSensorAvailable(available);
+      if (available != null) setSensorAvailable(available);
     });
 
     final knownAvailable = await _prefsService.getStepSensorAvailable();
     if (knownAvailable != null && _sensorAvailable == null) {
-      _setSensorAvailable(knownAvailable);
+      setSensorAvailable(knownAvailable);
     }
 
     _statusSubscription = Pedometer.pedestrianStatusStream.listen(
