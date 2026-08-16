@@ -75,23 +75,12 @@ class StepAccumulator {
   /// Folds one raw cumulative reading into the day's totals and persists them.
   Future<StepReading> record(int rawCumulative, DateTime now) async {
     final date = dateKey(now);
-
-    // A reading below the previous one means the hardware counter restarted:
-    // it counts from the last boot, so a reboot zeroes it.
-    //
-    // Compared against the previous reading, not the baseline. The baseline
-    // goes negative after the first reset of a day, and nothing falls below a
-    // negative number — so a second reboot the same day went unnoticed, the
-    // stale baseline survived, and the day reverted to its total as of the
-    // first reboot, discarding everything walked between them.
     final previousRaw = _lastRawSteps ?? await _store.readLastRaw();
     final sensorReset = previousRaw != null && rawCumulative < previousRaw;
 
     if (_trackedDate != date || sensorReset) {
       _trackedDate = date;
-      // Loaded before the baseline, not after: the baseline is reconstructed
-      // from the stored daily total, which includes manual credits, and those
-      // have to come back out before that arithmetic means anything.
+      // Loaded before the baseline
       _manualSteps = await _store.readManualSteps(date);
 
       final storedTotal = await _store.readDailySteps(date) ?? 0;
