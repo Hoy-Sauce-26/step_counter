@@ -116,19 +116,8 @@ void main() {
       expect(store.hourly['2026-08-16@9'], 500);
     });
 
-    // Characterises B6 rather than asserting what would be right. The hour
-    // does resume from its stored count instead of restarting at zero — that
-    // part works. But the reading that revives it gets absorbed into
-    // re-establishing the boundary, so its steps vanish: 500 were walked in
-    // this hour and 400 are recorded. Normally that costs one step; after a
-    // stretch with the screen off, where readings arrive batched, it costs
-    // the whole batch.
-    //
-    // Preserved deliberately through this extraction so that a refactor
-    // break and a deliberate fix stay distinguishable. B6 turns the 400 into
-    // a 500, and this test should go red when it does.
-    test('a restart mid-hour resumes the hour, minus the reviving reading',
-        () async {
+    test('a restart mid-hour resumes the hour without losing the reading '
+        'that resumed it', () async {
       await accumulator.record(1000, DateTime(2026, 8, 16, 9));
       await accumulator.record(1400, DateTime(2026, 8, 16, 9));
 
@@ -137,7 +126,39 @@ void main() {
       final revived = StepAccumulator(store);
       final reading = await revived.record(1500, DateTime(2026, 8, 16, 9));
 
-      expect(reading.hourlySteps, 400);
+      expect(reading.hourlySteps, 500,
+          reason: '500 were walked in this hour and 500 should be recorded');
+    });
+
+    test('a batched reading after a screen-off stretch is not swallowed',
+        () async {
+      await accumulator.record(1000, DateTime(2026, 8, 16, 9));
+      await accumulator.record(1200, DateTime(2026, 8, 16, 9));
+
+      final revived = StepAccumulator(store);
+      final reading = await revived.record(3200, DateTime(2026, 8, 16, 9));
+
+      expect(reading.hourlySteps, 2200,
+          reason: '200 before the restart plus the 2000 in the batch');
+    });
+
+    test('an hour resumed after a reboot is neither lost nor double counted',
+        () async {
+      await accumulator.record(1000, DateTime(2026, 8, 16, 9));
+      await accumulator.record(1400, DateTime(2026, 8, 16, 9));
+
+      // The counter zeroes and the service restarts, both in the same hour.
+      final revived = StepAccumulator(store);
+      expect(
+        (await revived.record(5, DateTime(2026, 8, 16, 9))).hourlySteps,
+        400,
+        reason: 'the reboot itself carries no new steps',
+      );
+      expect(
+        (await revived.record(105, DateTime(2026, 8, 16, 9))).hourlySteps,
+        500,
+        reason: 'walking resumes on top of the hour, not from zero',
+      );
     });
 
     test('each day gets its own hourly buckets', () async {
