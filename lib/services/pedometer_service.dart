@@ -106,11 +106,7 @@ class PedometerService {
     // wouldn't pick up a recalibration until the next day or a restart.
     FlutterBackgroundService().invoke('setCorrectionFactor', {'factor': factor});
   }
-
-  /// Credits [amount] steps to today's total without any live tracking —
-  /// e.g. a route walked without the phone. The background service is the
-  /// one that actually applies it (see 'addManualSteps' there), since it
-  /// owns the daily total's computation.
+  
   Future<void> addManualSteps(int amount) async {
     FlutterBackgroundService().invoke('addManualSteps', {'steps': amount});
   }
