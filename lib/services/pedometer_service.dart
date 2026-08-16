@@ -108,9 +108,7 @@ class PedometerService {
 
   Future<void> setDailyTarget(int target) async {
     await _prefsService.setDailyTarget(target);
-    // Same reason as setCorrectionFactor: the service can't see this write,
-    // so the notification would keep counting toward the old target until
-    // something restarted it.
+    // Same reason as setCorrectionFactor
     FlutterBackgroundService().invoke('setDailyTarget', {'target': target});
   }
 
