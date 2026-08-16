@@ -14,7 +14,9 @@ class PedometerService {
   StreamSubscription<dynamic>? _bgStepSubscription;
   StreamSubscription<dynamic>? _bgRawSubscription;
   StreamSubscription<dynamic>? _bgRouteSubscription;
+  StreamSubscription<dynamic>? _bgSensorStatusSubscription;
   final _controller = StreamController<int>.broadcast();
+  final _sensorAvailableController = StreamController<bool>.broadcast();
   final _statusController = StreamController<String>.broadcast();
   final _rawCumulativeController = StreamController<int>.broadcast();
   final _routeStepsController = StreamController<int>.broadcast();
@@ -23,6 +25,7 @@ class PedometerService {
 
   bool _starting = false;
   int? _lastKnownRawSteps;
+  bool? _sensorAvailable;
 
   Stream<int> get todayStepsStream => _controller.stream;
 
@@ -31,6 +34,18 @@ class PedometerService {
   /// Live active-route step count, relayed from the background service's
   /// `'routeUpdate'` broadcast.
   Stream<int> get activeRouteStepsStream => _routeStepsController.stream;
+
+  Stream<bool> get sensorAvailableStream async* {
+    final known = _sensorAvailable;
+    if (known != null) yield known;
+    yield* _sensorAvailableController.stream;
+  }
+
+  void _setSensorAvailable(bool available) {
+    if (_sensorAvailable == available) return;
+    _sensorAvailable = available;
+    _sensorAvailableController.add(available);
+  }
 
   Future<bool> requestPermission() async {
     final status = await Permission.activityRecognition.request();
@@ -79,6 +94,17 @@ class PedometerService {
       final steps = event['steps'] as int? ?? 0;
       _routeStepsController.add(steps);
     });
+
+    _bgSensorStatusSubscription = service.on('sensorStatus').listen((event) {
+      if (event == null) return;
+      final available = event['available'] as bool?;
+      if (available != null) _setSensorAvailable(available);
+    });
+
+    final knownAvailable = await _prefsService.getStepSensorAvailable();
+    if (knownAvailable != null && _sensorAvailable == null) {
+      _setSensorAvailable(knownAvailable);
+    }
 
     _statusSubscription = Pedometer.pedestrianStatusStream.listen(
       (status) {
@@ -129,6 +155,8 @@ class PedometerService {
     _bgRawSubscription = null;
     _bgRouteSubscription?.cancel();
     _bgRouteSubscription = null;
+    _bgSensorStatusSubscription?.cancel();
+    _bgSensorStatusSubscription = null;
     _statusSubscription?.cancel();
     _statusSubscription = null;
   }
@@ -139,6 +167,7 @@ class PedometerService {
     _statusController.close();
     _rawCumulativeController.close();
     _routeStepsController.close();
+    _sensorAvailableController.close();
   }
 
   StreamSubscription<int> startCalibrationTest(

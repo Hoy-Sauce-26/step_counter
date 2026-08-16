@@ -34,6 +34,20 @@ class PreferencesService {
     await prefs.setDouble(_correctionFactorKey, factor);
   }
 
+  // Written by the background isolate — the only place allowed to touch the
+  // sensor — and read by the app at launch.
+  static const _stepSensorAvailableKey = 'stepSensorAvailable';
+
+  Future<bool?> getStepSensorAvailable() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_stepSensorAvailableKey);
+  }
+
+  Future<void> setStepSensorAvailable(bool available) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_stepSensorAvailableKey, available);
+  }
+
   // Nullable/unset by default — StepMetrics falls back to flat-rate
   // constants when missing, so personalization is opt-in.
   static const _heightCmKey = 'heightCm';

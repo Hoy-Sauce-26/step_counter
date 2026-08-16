@@ -90,6 +90,7 @@ class _HomePageState extends ConsumerState<HomePage>
     final unitSystem = ref.watch(unitSystemProvider);
     final stepsAsync = ref.watch(todayStepsProvider);
     final walkingStatus = ref.watch(walkingStatusProvider).value;
+    final sensorAvailable = ref.watch(stepSensorAvailableProvider).value;
 
     return Scaffold(
       appBar: AppBar(
@@ -161,6 +162,8 @@ class _HomePageState extends ConsumerState<HomePage>
             ? const Center(child: CircularProgressIndicator())
             : !_permissionGranted
                 ? _PermissionDenied(onRetry: _ensurePermission)
+                : sensorAvailable == false
+                ? const _SensorUnavailable()
                 : stepsAsync.when(
                     data: (steps) => _StepContent(
                       steps: steps,
@@ -206,19 +209,6 @@ class _StepContent extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    if (steps < 0) {
-      return const Center(
-        child: Padding(
-          padding: EdgeInsets.all(24),
-          child: Text(
-            "This device doesn't report a step-count sensor, "
-            "so live tracking isn't available.",
-            textAlign: TextAlign.center,
-          ),
-        ),
-      );
-    }
-
     final theme = Theme.of(context);
     final past7Days = ref.watch(past7DaysProvider);
 
@@ -284,6 +274,32 @@ class _StepContent extends ConsumerWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Shown only once the background service has confirmed missing hardware.
+class _SensorUnavailable extends StatelessWidget {
+  const _SensorUnavailable();
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: const [
+            Icon(Icons.sensors_off, size: 48),
+            SizedBox(height: 16),
+            Text(
+              "This device doesn't have a step-count sensor, so live "
+              "tracking isn't available.",
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
       ),
     );
   }
