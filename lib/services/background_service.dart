@@ -56,7 +56,10 @@ void onServiceStart(ServiceInstance service) async {
 
   String? trackedDate;
   int? baseline;
+
+  // Both of these are snapshots, not live reads.
   double correctionFactor = await prefsService.getCorrectionFactor();
+  int dailyTarget = await prefsService.getDailyTarget();
 
   // Hourly bucketing: hourStartDayTotal is the day's running total when
   // the current hour began — same idea as the daily baseline, one level in.
@@ -85,11 +88,16 @@ void onServiceStart(ServiceInstance service) async {
     };
   }
 
-  // Applies a live recalibration immediately, instead of waiting for the
-  // daily baseline refresh below to pick up the new factor from prefs.
+  // The only way a recalibration reaches this isolate.
   service.on('setCorrectionFactor').listen((event) {
     final factor = (event?['factor'] as num?)?.toDouble();
     if (factor != null) correctionFactor = factor;
+  });
+
+  // Same deal for the target
+  service.on('setDailyTarget').listen((event) {
+    final target = (event?['target'] as num?)?.toInt();
+    if (target != null) dailyTarget = target;
   });
 
   service.on('startRoute').listen((event) async {
@@ -116,18 +124,18 @@ void onServiceStart(ServiceInstance service) async {
     await prefsService.clearActiveRoute();
     // Revert the notification immediately rather than waiting for the
     // next step event.
-    final target = await prefsService.getDailyTarget();
     await NotificationService.updateStepNotification(
       steps: lastTodaySteps ?? 0,
-      target: target,
+      target: dailyTarget,
     );
   });
 
-  // The date check below only runs on a step event, which can be hours
-  // after midnight — until then the notification shows yesterday's count.
   // Schedule a single midnight timer instead of polling for it (skipped
   // while a route is active, so it doesn't stomp the route notification).
-  _scheduleMidnightNotificationReset(prefsService, () => activeRoute != null);
+  _scheduleMidnightNotificationReset(
+    () => dailyTarget,
+    () => activeRoute != null,
+  );
 
   Pedometer.stepCountStream.listen((event) async {
     final now = DateTime.now();
@@ -140,7 +148,6 @@ void onServiceStart(ServiceInstance service) async {
 
     if (trackedDate != today || sensorReset) {
       trackedDate = today;
-      correctionFactor = await prefsService.getCorrectionFactor();
       baseline = await _resolveBaseline(
         dbHelper,
         today,
@@ -155,7 +162,6 @@ void onServiceStart(ServiceInstance service) async {
     final rawDelta =
         (event.steps - (baseline ?? event.steps)).clamp(0, 1 << 30);
     final todaySteps = (rawDelta * correctionFactor).round();
-    final target = await prefsService.getDailyTarget();
 
     // Hourly bucketing.
     final currentHour = now.hour;
@@ -208,11 +214,11 @@ void onServiceStart(ServiceInstance service) async {
     } else {
       await NotificationService.updateStepNotification(
         steps: todaySteps,
-        target: target,
+        target: dailyTarget,
       );
     }
 
-    service.invoke('stepUpdate', {'steps': todaySteps, 'target': target});
+    service.invoke('stepUpdate', {'steps': todaySteps, 'target': dailyTarget});
     service.invoke('rawStep', {'raw': event.steps});
   });
 }
@@ -223,17 +229,19 @@ void onServiceStart(ServiceInstance service) async {
 /// step regardless; this just stops the notification from lagging.
 /// Skipped while [isRouteActive], so it doesn't overwrite a route notification.
 void _scheduleMidnightNotificationReset(
-  PreferencesService prefsService,
+  int Function() currentTarget,
   bool Function() isRouteActive,
 ) {
   final now = DateTime.now();
   final nextMidnight = DateTime(now.year, now.month, now.day + 1);
   Timer(nextMidnight.difference(now), () async {
     if (!isRouteActive()) {
-      final target = await prefsService.getDailyTarget();
-      await NotificationService.updateStepNotification(steps: 0, target: target);
+      await NotificationService.updateStepNotification(
+        steps: 0,
+        target: currentTarget(),
+      );
     }
-    _scheduleMidnightNotificationReset(prefsService, isRouteActive);
+    _scheduleMidnightNotificationReset(currentTarget, isRouteActive);
   });
 }
 

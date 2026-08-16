@@ -58,7 +58,9 @@ class DailyTargetNotifier extends Notifier<int> {
 
   Future<void> setTarget(int target) async {
     state = target;
-    await ref.read(preferencesServiceProvider).setDailyTarget(target);
+    // Routed through PedometerService, not PreferencesService, so the write
+    // is mirrored to the background isolate — same as [CalibrationFactorNotifier].
+    await ref.read(pedometerServiceProvider).setDailyTarget(target);
   }
 }
 
