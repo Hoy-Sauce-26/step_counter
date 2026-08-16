@@ -24,6 +24,7 @@ class _HomePageState extends ConsumerState<HomePage>
     with WidgetsBindingObserver {
   bool _permissionChecked = false;
   bool _permissionGranted = false;
+  bool _ensuringBackgroundService = false;
 
   @override
   void initState() {
@@ -52,11 +53,22 @@ class _HomePageState extends ConsumerState<HomePage>
   }
 
   Future<void> _ensureBackgroundServiceRunning() async {
-    if (!_permissionGranted) return;
-    final bgService = FlutterBackgroundService();
-    final isRunning = await bgService.isRunning();
-    if (!isRunning) {
-      await bgService.startService();
+    // Guards a check-then-act race: this is called both after granting
+    // permission and on every resume, and showing the permission dialog
+    // itself triggers a resume — so both call sites can land here at
+    // nearly the same moment, both see isRunning() == false, and both
+    // call startService(). That's the class of duplicate-start race the
+    // README warns can silently break step tracking.
+    if (!_permissionGranted || _ensuringBackgroundService) return;
+    _ensuringBackgroundService = true;
+    try {
+      final bgService = FlutterBackgroundService();
+      final isRunning = await bgService.isRunning();
+      if (!isRunning) {
+        await bgService.startService();
+      }
+    } finally {
+      _ensuringBackgroundService = false;
     }
   }
 

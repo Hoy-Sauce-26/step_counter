@@ -44,53 +44,54 @@ class PedometerService {
   Future<void> start() async {
     if (_bgStepSubscription != null || _starting) return;
     _starting = true;
+    
+    try {
+      final granted = await hasPermission();
+      if (!granted) {
+        debugPrint('[PedometerService] start() called without permission '
+            'granted yet — skipping for now.');
+        return;
+      }
 
-    final granted = await hasPermission();
-    if (!granted) {
-      debugPrint('[PedometerService] start() called without permission '
-          'granted yet — skipping for now.');
+      final today = _todayString();
+      final existing = await _dbHelper.getStepsForDate(today);
+      _controller.add(existing?.stepCount ?? 0);
+
+      final service = FlutterBackgroundService();
+
+      _bgStepSubscription = service.on('stepUpdate').listen((event) {
+        if (event == null) return;
+        final steps = event['steps'] as int? ?? 0;
+        debugPrint('[PedometerService] stepUpdate from background service: '
+            '$steps at ${DateTime.now()}');
+        _controller.add(steps);
+      });
+
+      _bgRawSubscription = service.on('rawStep').listen((event) {
+        if (event == null) return;
+        final raw = event['raw'] as int? ?? 0;
+        _lastKnownRawSteps = raw;
+        _rawCumulativeController.add(raw);
+      });
+
+      _bgRouteSubscription = service.on('routeUpdate').listen((event) {
+        if (event == null) return;
+        final steps = event['steps'] as int? ?? 0;
+        _routeStepsController.add(steps);
+      });
+
+      _statusSubscription = Pedometer.pedestrianStatusStream.listen(
+        (status) {
+          debugPrint('[PedometerService] pedestrian status: ${status.status} '
+              'at ${DateTime.now()}');
+          _statusController.add(status.status);
+        },
+        onError: (Object error) => _statusController.add('unknown'),
+        cancelOnError: false,
+      );
+    } finally {
       _starting = false;
-      return;
     }
-
-    final today = _todayString();
-    final existing = await _dbHelper.getStepsForDate(today);
-    _controller.add(existing?.stepCount ?? 0);
-
-    final service = FlutterBackgroundService();
-
-    _bgStepSubscription = service.on('stepUpdate').listen((event) {
-      if (event == null) return;
-      final steps = event['steps'] as int? ?? 0;
-      debugPrint('[PedometerService] stepUpdate from background service: '
-          '$steps at ${DateTime.now()}');
-      _controller.add(steps);
-    });
-
-    _bgRawSubscription = service.on('rawStep').listen((event) {
-      if (event == null) return;
-      final raw = event['raw'] as int? ?? 0;
-      _lastKnownRawSteps = raw;
-      _rawCumulativeController.add(raw);
-    });
-
-    _bgRouteSubscription = service.on('routeUpdate').listen((event) {
-      if (event == null) return;
-      final steps = event['steps'] as int? ?? 0;
-      _routeStepsController.add(steps);
-    });
-
-    _statusSubscription = Pedometer.pedestrianStatusStream.listen(
-      (status) {
-        debugPrint('[PedometerService] pedestrian status: ${status.status} '
-            'at ${DateTime.now()}');
-        _statusController.add(status.status);
-      },
-      onError: (Object error) => _statusController.add('unknown'),
-      cancelOnError: false,
-    );
-
-    _starting = false;
   }
 
   Future<void> refreshForCurrentDate() async {
