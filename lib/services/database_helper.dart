@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
 
@@ -21,14 +22,28 @@ class DatabaseHelper {
 
   static Database? _db;
 
+  /// Full path to open instead of the app's own database file. Tests point
+  /// this at an in-memory or temporary database; nothing else should set it.
+  @visibleForTesting
+  static String? databasePathOverride;
+
+  /// Closes the cached connection so the next access opens a fresh one.
+  /// Without this the singleton would carry one database across a whole test
+  /// file, and no test could start from an empty schema.
+  @visibleForTesting
+  static Future<void> resetForTesting() async {
+    await _db?.close();
+    _db = null;
+  }
+
   Future<Database> get database async {
     _db ??= await _initDatabase();
     return _db!;
   }
 
   Future<Database> _initDatabase() async {
-    final dbPath = await getDatabasesPath();
-    final path = p.join(dbPath, 'step_counter.db');
+    final path =
+        databasePathOverride ?? p.join(await getDatabasesPath(), 'step_counter.db');
     return openDatabase(
       path,
       version: 4,
