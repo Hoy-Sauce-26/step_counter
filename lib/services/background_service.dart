@@ -61,31 +61,19 @@ void onServiceStart(ServiceInstance service) async {
   double correctionFactor = await prefsService.getCorrectionFactor();
   int dailyTarget = await prefsService.getDailyTarget();
 
-  // Steps manually credited to today (e.g. a route logged without live
-  // tracking) — added on top of the sensor-derived total below. Kept
-  // separate from `baseline` so a real step never has to "know about" it;
-  // it's just an extra addend applied every time the total is computed.
+  // Steps manually credited to today (a route logged without live tracking)
   int manualSteps = await prefsService.getManualSteps(_todayString());
 
   // Hourly bucketing: hourStartDayTotal is the day's running total when
   // the current hour began — same idea as the daily baseline, one level in.
   String? trackedHourKey;
-  // Hourly buckets track sensor steps only, so they need their own running
-  // total — lastTodaySteps is the displayed figure and includes manual
-  // credits, which belong to no particular hour.
+  // Hourly buckets track sensor steps only
   int? hourStartSensorTotal;
   int? lastSensorSteps;
   int? lastTodaySteps;
 
-  // Latest raw sensor value, updated on every event. Seeds a new route
-  // session's baseline immediately — seeding from the *next* event instead
-  // would absorb that event's own step into "establishing zero" (see
-  // startCalibrationTest in pedometer_service.dart for the same bug/fix).
   int? lastKnownRawSteps;
 
-  // The route currently being tracked, or null. Baselined against the raw
-  // sensor value (not today's corrected total) so it survives a midnight
-  // rollover without resetting.
   Map<String, Object?>? activeRoute;
 
   final savedRoute = await prefsService.getActiveRoute();
@@ -147,9 +135,7 @@ void onServiceStart(ServiceInstance service) async {
     if (trackedDate != today) {
       // A manual credit can arrive before the day's first reading, when
       // manualSteps still holds yesterday's figure. Reload it, but leave
-      // trackedDate alone: it's what makes the sensor path re-resolve the
-      // baseline, and claiming the day is already resolved here would leave
-      // yesterday's baseline in place and fold yesterday's steps into today.
+      // trackedDate alone
       manualSteps = await prefsService.getManualSteps(today);
       lastTodaySteps = null;
       lastSensorSteps = null;
@@ -158,10 +144,6 @@ void onServiceStart(ServiceInstance service) async {
     manualSteps += amount;
     await prefsService.setManualSteps(today, manualSteps);
 
-    // Push an immediate update rather than waiting for the next real step.
-    // lastTodaySteps is null until a reading lands, so fall back to what's
-    // stored rather than to zero — treating "nothing read yet" as "no steps
-    // yet" would overwrite the day's total with just this credit.
     final runningTotal = lastTodaySteps ??
         (await dbHelper.getStepsForDate(today))?.stepCount ??
         0;
@@ -208,9 +190,6 @@ void onServiceStart(ServiceInstance service) async {
 
     if (trackedDate != today || sensorReset) {
       trackedDate = today;
-      // Loaded first: the baseline is reconstructed from the stored daily
-      // total, which now includes manual credits, and they have to come back
-      // out before that arithmetic means anything.
       manualSteps = await prefsService.getManualSteps(today);
       baseline = await _resolveBaseline(
         dbHelper,
@@ -230,9 +209,7 @@ void onServiceStart(ServiceInstance service) async {
     final sensorSteps = (rawDelta * correctionFactor).round();
     final displaySteps = sensorSteps + manualSteps;
 
-    // Hourly bucketing, over sensor steps only. Manual credits land on the
-    // daily total but in no hour: nobody walked them at a particular time,
-    // and picking one would make the chart assert something untrue.
+    // Hourly bucketing, over sensor steps only.
     final currentHour = now.hour;
     final hourKey = '$today-$currentHour';
     if (trackedHourKey != hourKey) {
@@ -332,9 +309,7 @@ Future<int> _resolveBaseline(
 
   final existing = await dbHelper.getStepsForDate(date);
   // Only the sensor-derived part of the stored total can be turned back into
-  // a raw reading. Manual credits never came from the sensor, so dividing
-  // them by the correction factor would invent raw steps that were never
-  // taken, push the baseline too far back, and count them twice.
+  // a raw reading.
   final sensorSteps =
       ((existing?.stepCount ?? 0) - manualSteps).clamp(0, 1 << 30);
   final baseline = resolveBaselineValue(

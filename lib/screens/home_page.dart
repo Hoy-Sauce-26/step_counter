@@ -28,9 +28,6 @@ class _HomePageState extends ConsumerState<HomePage>
 
   bool get _permissionGranted => _permission == StepPermissionStatus.granted;
 
-  // Guards the overlapping start attempts visible in the service logs: the
-  // resume handler and the permission flow both call in, and the await
-  // inside gives each a window to see "not running" as well.
   bool _ensuringBackgroundService = false;
   bool _backgroundServiceFailed = false;
 
