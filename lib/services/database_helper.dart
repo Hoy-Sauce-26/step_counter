@@ -210,6 +210,15 @@ class DatabaseHelper {
         .toList();
   }
 
+  Future<int> getSessionCountForRoute(int routeId) async {
+    final db = await database;
+    final result = await db.rawQuery(
+      'SELECT COUNT(*) AS count FROM route_sessions WHERE routeId = ?',
+      [routeId],
+    );
+    return (result.first['count'] as num).toInt();
+  }
+
   /// Records one completed session of a route.
   Future<void> insertRouteSession({
     required int routeId,

@@ -28,6 +28,9 @@ class _HomePageState extends ConsumerState<HomePage>
 
   bool get _permissionGranted => _permission == StepPermissionStatus.granted;
 
+  bool _ensuringBackgroundService = false;
+  bool _backgroundServiceFailed = false;
+
   @override
   void initState() {
     super.initState();
@@ -58,11 +61,25 @@ class _HomePageState extends ConsumerState<HomePage>
   }
 
   Future<void> _ensureBackgroundServiceRunning() async {
-    if (!_permissionGranted) return;
-    final bgService = FlutterBackgroundService();
-    final isRunning = await bgService.isRunning();
-    if (!isRunning) {
-      await bgService.startService();
+    if (!_permissionGranted || _ensuringBackgroundService) return;
+    _ensuringBackgroundService = true;
+    try {
+      final bgService = FlutterBackgroundService();
+      final isRunning = await bgService.isRunning();
+      if (!isRunning) {
+        await bgService.startService();
+      }
+      if (mounted && _backgroundServiceFailed) {
+        setState(() => _backgroundServiceFailed = false);
+      }
+    } catch (error, stackTrace) {
+      debugPrint('[HomePage] Failed to start background service: $error\n'
+          '$stackTrace');
+      if (mounted) {
+        setState(() => _backgroundServiceFailed = true);
+      }
+    } finally {
+      _ensuringBackgroundService = false;
     }
   }
 
@@ -120,7 +137,7 @@ class _HomePageState extends ConsumerState<HomePage>
 
     if (sensorAvailable == false) return const _SensorUnavailable();
 
-    return stepsAsync.when(
+    final content = stepsAsync.when(
       data: (steps) => _StepContent(
         steps: steps,
         target: target,
@@ -131,6 +148,18 @@ class _HomePageState extends ConsumerState<HomePage>
       ),
       loading: () => const Center(child: CircularProgressIndicator()),
       error: (err, st) => Center(child: Text('Sensor error: $err')),
+    );
+    if (!_backgroundServiceFailed) return content;
+
+    // Sits above the counts rather than replacing them: the stored total is
+    // still real and worth showing, it just isn't advancing.
+    return Column(
+      children: [
+        _BackgroundServiceFailedBanner(
+          onRetry: _ensureBackgroundServiceRunning,
+        ),
+        Expanded(child: content),
+      ],
     );
   }
 
@@ -376,6 +405,29 @@ class _PermissionBlocked extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _BackgroundServiceFailedBanner extends StatelessWidget {
+  final VoidCallback onRetry;
+
+  const _BackgroundServiceFailedBanner({required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return MaterialBanner(
+      backgroundColor: theme.colorScheme.errorContainer,
+      leading: Icon(Icons.warning_amber, color: theme.colorScheme.onErrorContainer),
+      content: Text(
+        "Step tracking couldn't start — your steps may not be counted "
+        "until this is retried.",
+        style: TextStyle(color: theme.colorScheme.onErrorContainer),
+      ),
+      actions: [
+        TextButton(onPressed: onRetry, child: const Text('Retry')),
+      ],
     );
   }
 }

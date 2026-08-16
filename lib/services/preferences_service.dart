@@ -135,4 +135,16 @@ class PreferencesService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_activeRouteKey);
   }
+
+  /// Steps manually credited to [date] (e.g. a route logged without live
+  /// tracking), on top of whatever the sensor recorded. Defaults to 0.
+  Future<int> getManualSteps(String date) async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt('manualSteps_$date') ?? 0;
+  }
+
+  Future<void> setManualSteps(String date, int steps) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('manualSteps_$date', steps);
+  }
 }

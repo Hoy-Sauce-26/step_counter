@@ -96,63 +96,67 @@ class PedometerService {
     if (_bgStepSubscription != null || _starting) return;
     _starting = true;
 
-    final granted = await hasPermission();
-    if (!granted) {
-      debugPrint('[PedometerService] start() called without permission '
-          'granted yet — skipping for now.');
+    // try/finally so a throw can't leave _starting stuck true. It would
+    // block every later call permanently: _bgStepSubscription stays null on
+    // the failure path, so the guard above can never clear itself.
+    try {
+      final granted = await hasPermission();
+      if (!granted) {
+        debugPrint('[PedometerService] start() called without permission '
+            'granted yet — skipping for now.');
+        return;
+      }
+
+      final today = _todayString();
+      final existing = await _dbHelper.getStepsForDate(today);
+      _controller.add(existing?.stepCount ?? 0);
+
+      final service = FlutterBackgroundService();
+
+      _bgStepSubscription = service.on('stepUpdate').listen((event) {
+        if (event == null) return;
+        final steps = event['steps'] as int? ?? 0;
+        debugPrint('[PedometerService] stepUpdate from background service: '
+            '$steps at ${DateTime.now()}');
+        _controller.add(steps);
+      });
+
+      _bgRawSubscription = service.on('rawStep').listen((event) {
+        if (event == null) return;
+        final raw = event['raw'] as int? ?? 0;
+        _lastKnownRawSteps = raw;
+        _rawCumulativeController.add(raw);
+      });
+
+      _bgRouteSubscription = service.on('routeUpdate').listen((event) {
+        if (event == null) return;
+        final steps = event['steps'] as int? ?? 0;
+        _routeStepsController.add(steps);
+      });
+
+      _bgSensorStatusSubscription = service.on('sensorStatus').listen((event) {
+        if (event == null) return;
+        final available = event['available'] as bool?;
+        if (available != null) setSensorAvailable(available);
+      });
+
+      final knownAvailable = await _prefsService.getStepSensorAvailable();
+      if (knownAvailable != null && _sensorAvailable == null) {
+        setSensorAvailable(knownAvailable);
+      }
+
+      _statusSubscription = Pedometer.pedestrianStatusStream.listen(
+        (status) {
+          debugPrint('[PedometerService] pedestrian status: ${status.status} '
+              'at ${DateTime.now()}');
+          _statusController.add(status.status);
+        },
+        onError: (Object error) => _statusController.add('unknown'),
+        cancelOnError: false,
+      );
+    } finally {
       _starting = false;
-      return;
     }
-
-    final today = _todayString();
-    final existing = await _dbHelper.getStepsForDate(today);
-    _controller.add(existing?.stepCount ?? 0);
-
-    final service = FlutterBackgroundService();
-
-    _bgStepSubscription = service.on('stepUpdate').listen((event) {
-      if (event == null) return;
-      final steps = event['steps'] as int? ?? 0;
-      debugPrint('[PedometerService] stepUpdate from background service: '
-          '$steps at ${DateTime.now()}');
-      _controller.add(steps);
-    });
-
-    _bgRawSubscription = service.on('rawStep').listen((event) {
-      if (event == null) return;
-      final raw = event['raw'] as int? ?? 0;
-      _lastKnownRawSteps = raw;
-      _rawCumulativeController.add(raw);
-    });
-
-    _bgRouteSubscription = service.on('routeUpdate').listen((event) {
-      if (event == null) return;
-      final steps = event['steps'] as int? ?? 0;
-      _routeStepsController.add(steps);
-    });
-
-    _bgSensorStatusSubscription = service.on('sensorStatus').listen((event) {
-      if (event == null) return;
-      final available = event['available'] as bool?;
-      if (available != null) setSensorAvailable(available);
-    });
-
-    final knownAvailable = await _prefsService.getStepSensorAvailable();
-    if (knownAvailable != null && _sensorAvailable == null) {
-      setSensorAvailable(knownAvailable);
-    }
-
-    _statusSubscription = Pedometer.pedestrianStatusStream.listen(
-      (status) {
-        debugPrint('[PedometerService] pedestrian status: ${status.status} '
-            'at ${DateTime.now()}');
-        _statusController.add(status.status);
-      },
-      onError: (Object error) => _statusController.add('unknown'),
-      cancelOnError: false,
-    );
-
-    _starting = false;
   }
 
   Future<void> refreshForCurrentDate() async {
@@ -166,6 +170,10 @@ class PedometerService {
     // The background service caches its own copy — without this it
     // wouldn't pick up a recalibration until the next day or a restart.
     FlutterBackgroundService().invoke('setCorrectionFactor', {'factor': factor});
+  }
+
+  Future<void> addManualSteps(int amount) async {
+    FlutterBackgroundService().invoke('addManualSteps', {'steps': amount});
   }
 
   Future<void> setDailyTarget(int target) async {

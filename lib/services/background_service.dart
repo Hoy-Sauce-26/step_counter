@@ -61,21 +61,19 @@ void onServiceStart(ServiceInstance service) async {
   double correctionFactor = await prefsService.getCorrectionFactor();
   int dailyTarget = await prefsService.getDailyTarget();
 
+  // Steps manually credited to today (a route logged without live tracking)
+  int manualSteps = await prefsService.getManualSteps(_todayString());
+
   // Hourly bucketing: hourStartDayTotal is the day's running total when
   // the current hour began — same idea as the daily baseline, one level in.
   String? trackedHourKey;
-  int? hourStartDayTotal;
+  // Hourly buckets track sensor steps only
+  int? hourStartSensorTotal;
+  int? lastSensorSteps;
   int? lastTodaySteps;
 
-  // Latest raw sensor value, updated on every event. Seeds a new route
-  // session's baseline immediately — seeding from the *next* event instead
-  // would absorb that event's own step into "establishing zero" (see
-  // startCalibrationTest in pedometer_service.dart for the same bug/fix).
   int? lastKnownRawSteps;
 
-  // The route currently being tracked, or null. Baselined against the raw
-  // sensor value (not today's corrected total) so it survives a midnight
-  // rollover without resetting.
   Map<String, Object?>? activeRoute;
 
   final savedRoute = await prefsService.getActiveRoute();
@@ -130,6 +128,38 @@ void onServiceStart(ServiceInstance service) async {
     );
   });
 
+  service.on('addManualSteps').listen((event) async {
+    final amount = event?['steps'] as int?;
+    if (amount == null || amount <= 0) return;
+    final today = _todayString();
+    if (trackedDate != today) {
+      // A manual credit can arrive before the day's first reading, when
+      // manualSteps still holds yesterday's figure. Reload it, but leave
+      // trackedDate alone
+      manualSteps = await prefsService.getManualSteps(today);
+      lastTodaySteps = null;
+      lastSensorSteps = null;
+      trackedHourKey = null;
+    }
+    manualSteps += amount;
+    await prefsService.setManualSteps(today, manualSteps);
+
+    final runningTotal = lastTodaySteps ??
+        (await dbHelper.getStepsForDate(today))?.stepCount ??
+        0;
+    final newTotal = runningTotal + amount;
+    lastTodaySteps = newTotal;
+    await dbHelper.upsertSteps(DailySteps(date: today, stepCount: newTotal));
+    // Deliberately no upsertHourlySteps: these steps have no hour.
+    if (activeRoute == null) {
+      await NotificationService.updateStepNotification(
+        steps: newTotal,
+        target: dailyTarget,
+      );
+    }
+    service.invoke('stepUpdate', {'steps': newTotal, 'target': dailyTarget});
+  });
+
   // Schedule a single midnight timer instead of polling for it (skipped
   // while a route is active, so it doesn't stomp the route notification).
   _scheduleMidnightNotificationReset(
@@ -160,22 +190,26 @@ void onServiceStart(ServiceInstance service) async {
 
     if (trackedDate != today || sensorReset) {
       trackedDate = today;
+      manualSteps = await prefsService.getManualSteps(today);
       baseline = await _resolveBaseline(
         dbHelper,
         today,
         event.steps,
         correctionFactor,
+        manualSteps,
       );
       // New day's — or a re-baselined day's — running total no longer lines up.
       lastTodaySteps = null;
+      lastSensorSteps = null;
       trackedHourKey = null;
     }
 
     final rawDelta =
         (event.steps - (baseline ?? event.steps)).clamp(0, 1 << 30);
-    final todaySteps = (rawDelta * correctionFactor).round();
+    final sensorSteps = (rawDelta * correctionFactor).round();
+    final displaySteps = sensorSteps + manualSteps;
 
-    // Hourly bucketing.
+    // Hourly bucketing, over sensor steps only.
     final currentHour = now.hour;
     final hourKey = '$today-$currentHour';
     if (trackedHourKey != hourKey) {
@@ -186,18 +220,19 @@ void onServiceStart(ServiceInstance service) async {
       // this hour's first step shows up right away.
       final existingHour =
           await dbHelper.getHourlyStepsForDateAndHour(today, currentHour);
-      hourStartDayTotal = existingHour != null
-          ? todaySteps - existingHour
-          : (lastTodaySteps ?? todaySteps);
+      hourStartSensorTotal = existingHour != null
+          ? sensorSteps - existingHour
+          : (lastSensorSteps ?? sensorSteps);
     }
     final hourlySteps =
-        (todaySteps - (hourStartDayTotal ?? todaySteps)).clamp(0, 1 << 30);
+        (sensorSteps - (hourStartSensorTotal ?? sensorSteps)).clamp(0, 1 << 30);
 
     await dbHelper.upsertSteps(
-      DailySteps(date: today, stepCount: todaySteps),
+      DailySteps(date: today, stepCount: displaySteps),
     );
     await dbHelper.upsertHourlySteps(today, currentHour, hourlySteps);
-    lastTodaySteps = todaySteps;
+    lastTodaySteps = displaySteps;
+    lastSensorSteps = sensorSteps;
 
     // Steps always count toward the daily total above regardless of an
     // active route — only the notification display branches.
@@ -225,12 +260,12 @@ void onServiceStart(ServiceInstance service) async {
       service.invoke('routeUpdate', {'steps': routeSteps});
     } else {
       await NotificationService.updateStepNotification(
-        steps: todaySteps,
+        steps: displaySteps,
         target: dailyTarget,
       );
     }
 
-    service.invoke('stepUpdate', {'steps': todaySteps, 'target': dailyTarget});
+    service.invoke('stepUpdate', {'steps': displaySteps, 'target': dailyTarget});
     service.invoke('rawStep', {'raw': event.steps});
   }, onError: (Object error) async {
     // Need this handler here for devices with no step sensor.
@@ -267,15 +302,20 @@ Future<int> _resolveBaseline(
   String date,
   int rawCumulative,
   double correctionFactor,
+  int manualSteps,
 ) async {
   final prefs = await SharedPreferences.getInstance();
   final key = 'baseline_$date';
 
   final existing = await dbHelper.getStepsForDate(date);
+  // Only the sensor-derived part of the stored total can be turned back into
+  // a raw reading.
+  final sensorSteps =
+      ((existing?.stepCount ?? 0) - manualSteps).clamp(0, 1 << 30);
   final baseline = resolveBaselineValue(
     rawCumulative: rawCumulative,
     savedBaseline: prefs.getInt(key),
-    existingSteps: existing?.stepCount ?? 0,
+    existingSteps: sensorSteps,
     correctionFactor: correctionFactor,
   );
 
