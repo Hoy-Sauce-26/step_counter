@@ -4,12 +4,6 @@ import 'package:flutter_background_service/flutter_background_service.dart';
 
 /// Every message crossing the isolate boundary, defined once.
 ///
-/// These used to be bare strings written twice — once at the `invoke`, once at
-/// the matching `on` — with untyped maps and hand-written casts at both ends.
-/// Nothing checked that the two spellings agreed, and a mismatch is silent: the
-/// sender succeeds, the listener simply never fires. That is exactly how B3
-/// went unnoticed, with the daily target being written and never arriving.
-///
 /// Each channel below names itself once and carries its own encoding, so a
 /// typo is a compile error rather than a setting that quietly stops working.
 /// Direction is part of the type: [ServiceCommand] only travels app → service
@@ -26,11 +20,7 @@ class ServiceCommand<T> {
   void send(FlutterBackgroundService service, T value) =>
       service.invoke(name, _encode(value));
 
-  /// Registers [onCommand] in the service isolate. A payload that doesn't
-  /// decode is dropped rather than thrown: the only sender is this same app,
-  /// so a malformed one means an updated app is talking to a service still
-  /// running the previous build, and killing the isolate would be worse than
-  /// ignoring one message.
+  /// Registers [onCommand] in the service isolate.
   StreamSubscription<Map<String, dynamic>?> handle(
     ServiceInstance service,
     void Function(T value) onCommand,
@@ -86,9 +76,7 @@ class ServiceReport<T> {
 // Commands: app → service
 // ---------------------------------------------------------------------------
 
-/// Neither of these can be read from storage in the service isolate —
-/// SharedPreferences hands each isolate a private copy — so this channel is
-/// the only way a change reaches it.
+/// Neither of these can be read from storage in the service isolate.
 final setCorrectionFactor = ServiceCommand<double>(
   'setCorrectionFactor',
   (factor) => {'factor': factor},
@@ -168,8 +156,5 @@ class StepUpdate {
   const StepUpdate({required this.steps, required this.date});
 
   final int steps;
-
-  /// The day this count belongs to, so the app can tell a live figure from a
-  /// stored one that may be seconds behind it.
   final String? date;
 }

@@ -92,10 +92,7 @@ void onServiceStart(ServiceInstance service) async {
   channel.setDailyTarget.handle(service, (target) => dailyTarget = target);
 
   // This isolate is the only writer of the stored active route. The app
-  // holds its own copy for the UI but must not persist it: its version knows
-  // nothing of rawBaseline, stepsBefore or steps, so a write from there would
-  // reset a walk's progress to zero. Clearing is still allowed from both
-  // sides — that can only ever end a route, never lose one mid-way.
+  // holds its own copy for the UI but must not persist it.
   channel.startRoute.handle(service, (command) async {
     final id = command.routeId;
     final name = command.routeName;

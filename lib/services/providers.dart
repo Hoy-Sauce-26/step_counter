@@ -248,9 +248,6 @@ class ActiveRouteNotifier extends Notifier<ActiveRoute?> {
       routeName: routeName,
       startTime: startTime,
     );
-    // Deliberately not persisted here. The service owns the stored route: it
-    // is the only side that knows rawBaseline, stepsBefore and steps, and a
-    // write from here would carry none of them and reset a walk in progress.
     channel.startRoute.send(
       FlutterBackgroundService(),
       channel.StartRoute(routeId: routeId, routeName: routeName),
@@ -261,8 +258,7 @@ class ActiveRouteNotifier extends Notifier<ActiveRoute?> {
     state = null;
     ref.read(pedometerServiceProvider).clearActiveRouteSteps();
     // Cleared from both sides, unlike the write above. Clearing is
-    // idempotent and can only end a route — worth doing here too, so a route
-    // doesn't survive as a phantom if the service isn't running to hear this.
+    // idempotent and can only end a route.
     await ref.read(preferencesServiceProvider).clearActiveRoute();
     channel.stopRoute.send(FlutterBackgroundService());
   }

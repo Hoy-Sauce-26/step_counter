@@ -35,7 +35,7 @@ void main() {
 
   group('opening the database', () {
     // Two callers reach for the database at once on any launch — the pedometer
-    // service and the seven-day chart provider. 
+    // service and the seven-day chart provider.
     //
     // Counting opens is the only way to see this.
     test('concurrent first callers trigger a single open', () async {
