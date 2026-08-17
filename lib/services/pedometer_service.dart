@@ -8,6 +8,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'database_helper.dart';
 import 'formatting.dart';
 import 'preferences_service.dart';
+import 'service_channel.dart' as channel;
 
 /// The three permission outcomes the UI has to tell apart. [denied] can be
 /// retried with a system dialog; [permanentlyDenied] can't — Android silently
@@ -132,32 +133,23 @@ class PedometerService {
 
       final service = FlutterBackgroundService();
 
-      _bgStepSubscription = service.on('stepUpdate').listen((event) {
-        if (event == null) return;
-        final steps = event['steps'] as int? ?? 0;
-        _liveStepsDate = event['date'] as String?;
+      _bgStepSubscription = channel.stepUpdate.listen(service, (update) {
+        _liveStepsDate = update.date;
         debugPrint('[PedometerService] stepUpdate from background service: '
-            '$steps at ${DateTime.now()}');
-        _controller.add(steps);
+            '${update.steps} at ${DateTime.now()}');
+        _controller.add(update.steps);
       });
 
-      _bgRawSubscription = service.on('rawStep').listen((event) {
-        if (event == null) return;
-        final raw = event['raw'] as int? ?? 0;
+      _bgRawSubscription = channel.rawStep.listen(service, (raw) {
         _lastKnownRawSteps = raw;
         _rawCumulativeController.add(raw);
       });
 
-      _bgRouteSubscription = service.on('routeUpdate').listen((event) {
-        if (event == null) return;
-        _setActiveRouteSteps(event['steps'] as int? ?? 0);
-      });
+      _bgRouteSubscription =
+          channel.routeUpdate.listen(service, _setActiveRouteSteps);
 
-      _bgSensorStatusSubscription = service.on('sensorStatus').listen((event) {
-        if (event == null) return;
-        final available = event['available'] as bool?;
-        if (available != null) setSensorAvailable(available);
-      });
+      _bgSensorStatusSubscription =
+          channel.sensorStatus.listen(service, setSensorAvailable);
 
       // A route in progress across an app restart has no live broadcast to
       // catch up on — the service only emits on a reading.
@@ -199,17 +191,17 @@ class PedometerService {
     await _prefsService.setCorrectionFactor(factor);
     // The background service caches its own copy — without this it
     // wouldn't pick up a recalibration until the next day or a restart.
-    FlutterBackgroundService().invoke('setCorrectionFactor', {'factor': factor});
+    channel.setCorrectionFactor.send(FlutterBackgroundService(), factor);
   }
 
   Future<void> addManualSteps(int amount) async {
-    FlutterBackgroundService().invoke('addManualSteps', {'steps': amount});
+    channel.addManualSteps.send(FlutterBackgroundService(), amount);
   }
 
   Future<void> setDailyTarget(int target) async {
     await _prefsService.setDailyTarget(target);
     // Same reason as setCorrectionFactor
-    FlutterBackgroundService().invoke('setDailyTarget', {'target': target});
+    channel.setDailyTarget.send(FlutterBackgroundService(), target);
   }
 
   void stop() {

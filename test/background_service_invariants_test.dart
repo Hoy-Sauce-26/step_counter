@@ -23,8 +23,14 @@ import 'package:flutter_test/flutter_test.dart';
 const _serviceSource = 'lib/services/background_service.dart';
 
 /// Settings mirrored into the background isolate, as
-/// `accessor: invoke channel`. Add an entry here when a new setting starts
-/// being mirrored.
+/// `accessor: channel`. Add an entry here when a new setting starts being
+/// mirrored.
+///
+/// The channel names are now identifiers in service_channel.dart rather than
+/// bare strings, so a typo on either side is a compile error and no longer
+/// needs guarding here. What still does is that a handler is registered at
+/// all: a channel nobody listens to compiles perfectly and silently drops
+/// every message, which is precisely how B3 behaved.
 const _mirroredSettings = <String, String>{
   'getDailyTarget': 'setDailyTarget',
   'getCorrectionFactor': 'setCorrectionFactor',
@@ -93,17 +99,19 @@ void main() {
       }
     });
 
-    test('every mirrored setting has an invoke handler', () {
+    test('every mirrored setting has a handler registered', () {
       final lines = _sourceLines();
 
-      for (final MapEntry(key: accessor, value: channel)
+      for (final MapEntry(key: accessor, value: channelName)
           in _mirroredSettings.entries) {
         expect(
-          lines.any((line) => line.contains("service.on('$channel')")),
+          lines.any((line) => line.contains('$channelName.handle(')),
           isTrue,
-          reason: 'No handler for "$channel" in $_serviceSource. Without one, '
-              'the value read from $accessor() at start-up never updates and '
-              'the app\'s changes never reach this isolate.',
+          reason: 'Nothing handles the "$channelName" channel in '
+              '$_serviceSource. Without a handler the value read from '
+              '$accessor() at start-up never updates, the app\'s changes are '
+              'accepted and dropped, and the service runs on its start-up '
+              'copy for as long as it lives.',
         );
       }
     });

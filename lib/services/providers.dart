@@ -9,6 +9,7 @@ import 'formatting.dart';
 import 'metrics.dart';
 import 'pedometer_service.dart';
 import 'preferences_service.dart';
+import 'service_channel.dart' as channel;
 
 final pedometerServiceProvider = Provider<PedometerService>((ref) {
   final service = PedometerService();
@@ -247,22 +248,23 @@ class ActiveRouteNotifier extends Notifier<ActiveRoute?> {
       routeName: routeName,
       startTime: startTime,
     );
-    await ref.read(preferencesServiceProvider).setActiveRoute(
-          routeId: routeId,
-          routeName: routeName,
-          startTime: startTime,
-        );
-    FlutterBackgroundService().invoke('startRoute', {
-      'routeId': routeId,
-      'routeName': routeName,
-    });
+    // Deliberately not persisted here. The service owns the stored route: it
+    // is the only side that knows rawBaseline, stepsBefore and steps, and a
+    // write from here would carry none of them and reset a walk in progress.
+    channel.startRoute.send(
+      FlutterBackgroundService(),
+      channel.StartRoute(routeId: routeId, routeName: routeName),
+    );
   }
 
   Future<void> stopRoute() async {
     state = null;
     ref.read(pedometerServiceProvider).clearActiveRouteSteps();
+    // Cleared from both sides, unlike the write above. Clearing is
+    // idempotent and can only end a route — worth doing here too, so a route
+    // doesn't survive as a phantom if the service isn't running to hear this.
     await ref.read(preferencesServiceProvider).clearActiveRoute();
-    FlutterBackgroundService().invoke('stopRoute');
+    channel.stopRoute.send(FlutterBackgroundService());
   }
 }
 
