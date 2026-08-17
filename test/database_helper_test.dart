@@ -33,6 +33,29 @@ void main() {
     DatabaseHelper.databasePathOverride = null;
   });
 
+  group('opening the database', () {
+    // Two callers reach for the database at once on any launch — the pedometer
+    // service and the seven-day chart provider. 
+    //
+    // Counting opens is the only way to see this.
+    test('concurrent first callers trigger a single open', () async {
+      DatabaseHelper.openCount = 0;
+
+      await Future.wait([db.database, db.database, db.database]);
+
+      expect(DatabaseHelper.openCount, 1);
+    });
+
+    test('a later caller reuses the open rather than repeating it', () async {
+      await db.database;
+      DatabaseHelper.openCount = 0;
+
+      await db.database;
+
+      expect(DatabaseHelper.openCount, 0);
+    });
+  });
+
   group('daily steps', () {
     test('stores and reads back a day', () async {
       await db.upsertSteps(DailySteps(date: '2026-08-16', stepCount: 4200));
