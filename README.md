@@ -61,6 +61,16 @@ Three things are load-bearing:
   nothing falls below a negative number — comparing against it misses a second
   reboot and reverts the day. The previous reading is persisted on every
   reading and never buffered.
+- **A new day is anchored at the previous reading, not the one that opens
+  it.** The sensor counts while the CPU sleeps and hands over the whole batch
+  when it wakes, so the first reading of a day routinely arrives *after* the
+  walk that produced it and carries all of it. Anchoring the day at that
+  reading makes the walk the day's zero, which is how a night with the app
+  closed plus a morning walk came to count nothing at all. The reading and the
+  time it arrived are stored under one key, as one value: a gap wider than
+  `StepAccumulator.maxCarryOverGap` is a service that was down for a day or
+  more and its batch is dropped rather than dumped on today, so a count whose
+  age is unknown is useless — and two keys let a process die between them.
 - **The daily target and correction factor are mirrored to the service over
   `invoke`.** SharedPreferences gives each isolate a private copy, so a value
   the app writes is invisible there. `StepAccumulator` has no storage access
@@ -182,7 +192,13 @@ Testers install the APK directly. As long as the signing key and
 - **Screen-off steps arrive in batches**, because the sensor buffers readings
   while the CPU sleeps. They are counted in full — the reading that delivers a
   batch carries all of it — but the display and notification lag until it
-  lands.
+  lands. A batch spanning midnight counts entirely toward the day it is
+  delivered on: it carries no timestamps to split it by, so a late-night walk
+  the device slept through can land on the following morning.
+- **A batch delivered more than `maxCarryOverGap` (18h) after the previous
+  reading is dropped**, not counted, when it spans a date change. That gap
+  means the service was down for a day or more, and there is no way to tell
+  which of those days its steps belong to.
 - **An unclean reboot can lose up to ten seconds of steps.** Database writes
   are buffered and flushed on a timer; an ordinary kill costs nothing, since
   the next reading recomputes the total from the baseline, but a reboot

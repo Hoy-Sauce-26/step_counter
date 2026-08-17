@@ -19,9 +19,10 @@ abstract class StepStore {
   Future<int?> readHourlySteps(String date, int hour);
   Future<void> writeHourlySteps(String date, int hour, int steps);
 
-  /// The last raw reading seen, across all days. Device-wide, not per-date.
-  Future<int?> readLastRaw();
-  Future<void> writeLastRaw(int rawCumulative);
+  /// The last raw reading and when it arrived. Device-wide, not per-date,
+  /// and one value rather than two so the pair can never disagree.
+  Future<LastRawReading?> readLastReading();
+  Future<void> writeLastReading(LastRawReading reading);
 }
 
 /// What one sensor reading worked out to.
@@ -51,6 +52,10 @@ class StepReading {
 class StepAccumulator {
   StepAccumulator(this._store, {this.correctionFactor = 1.0});
 
+  /// How long a gap between two readings may be for the steps batched inside
+  /// it to still count toward the day the later reading lands on.
+  static const Duration maxCarryOverGap = Duration(hours: 18);
+
   final StepStore _store;
 
   double correctionFactor;
@@ -66,8 +71,9 @@ class StepAccumulator {
   int _lastSensorSteps = 0;
   int? _lastDisplaySteps;
 
-  /// The previous raw reading.
+  /// The previous raw reading, and when it arrived.
   int? _lastRawSteps;
+  DateTime? _lastRawAt;
 
   /// The most recent displayed total, or null if nothing has been recorded
   /// since this accumulator was created.
@@ -76,7 +82,14 @@ class StepAccumulator {
   /// Folds one raw cumulative reading into the day's totals and persists them.
   Future<StepReading> record(int rawCumulative, DateTime now) async {
     final date = dateKey(now);
-    final previousRaw = _lastRawSteps ?? await _store.readLastRaw();
+    // Read as a pair: a reading without its timestamp can't be carried over.
+    var previousRaw = _lastRawSteps;
+    var previousRawAt = _lastRawAt;
+    if (previousRaw == null) {
+      final stored = await _store.readLastReading();
+      previousRaw = stored?.raw;
+      previousRawAt = stored?.at;
+    }
     final sensorReset = previousRaw != null && rawCumulative < previousRaw;
 
     if (_trackedDate != date || sensorReset) {
@@ -96,6 +109,7 @@ class StepAccumulator {
         rawCumulative,
         storedSensorSteps,
         sensorReset,
+        _carriedOverRaw(previousRaw, previousRawAt, now),
       );
       // A new day's — or a re-baselined day's — running totals no longer line
       // up with what came before.
@@ -124,7 +138,10 @@ class StepAccumulator {
     await _store.writeHourlySteps(date, hour, hourlySteps);
     // Written on every reading and never buffered. A stale value is a no-no
     _lastRawSteps = rawCumulative;
-    await _store.writeLastRaw(rawCumulative);
+    _lastRawAt = now;
+    await _store.writeLastReading(
+      LastRawReading(raw: rawCumulative, at: now),
+    );
     _lastDisplaySteps = displaySteps;
     _lastSensorSteps = sensorSteps;
 
@@ -172,6 +189,7 @@ class StepAccumulator {
     int rawCumulative,
     int storedSensorSteps,
     bool sensorHasReset,
+    int? carriedOverRaw,
   ) async {
     final baseline = resolveBaselineValue(
       rawCumulative: rawCumulative,
@@ -179,10 +197,24 @@ class StepAccumulator {
       sensorHasReset: sensorHasReset,
       existingSteps: storedSensorSteps,
       correctionFactor: correctionFactor,
+      previousRaw: carriedOverRaw,
     );
 
     await _store.writeBaseline(date, baseline);
     return baseline;
+  }
+
+  /// The previous reading, if the gap since it is short enough that the steps
+  /// batched inside it can be credited to the day of the current reading.
+  static int? _carriedOverRaw(
+    int? previousRaw,
+    DateTime? previousRawAt,
+    DateTime now,
+  ) {
+    if (previousRaw == null || previousRawAt == null) return null;
+    final gap = now.difference(previousRawAt);
+    if (gap.isNegative || gap > maxCarryOverGap) return null;
+    return previousRaw;
   }
 }
 
@@ -193,13 +225,16 @@ int resolveBaselineValue({
   required bool sensorHasReset,
   required int existingSteps,
   required double correctionFactor,
+  int? previousRaw,
 }) {
   if (savedBaseline != null && !sensorHasReset) {
     return savedBaseline;
   }
   final rawExistingDelta =
       correctionFactor == 0 ? 0 : (existingSteps / correctionFactor).round();
-  return rawCumulative - rawExistingDelta;
+  final anchor =
+      sensorHasReset ? rawCumulative : (previousRaw ?? rawCumulative);
+  return anchor - rawExistingDelta;
 }
 
 class ThrottledStepStore implements StepStore {
@@ -260,13 +295,13 @@ class ThrottledStepStore implements StepStore {
   Future<int> readManualSteps(String date) => _inner.readManualSteps(date);
 
   @override
-  Future<int?> readLastRaw() => _inner.readLastRaw();
+  Future<LastRawReading?> readLastReading() => _inner.readLastReading();
 
   // Not buffered, unlike the rows above. Losing this one is different as a
   // value left sitting below a post-reboot reading makes the restart invisible.
   @override
-  Future<void> writeLastRaw(int rawCumulative) =>
-      _inner.writeLastRaw(rawCumulative);
+  Future<void> writeLastReading(LastRawReading reading) =>
+      _inner.writeLastReading(reading);
 
   /// Commits everything buffered. Call before the service stops — a timer that
   /// never fires is the one way buffered steps go missing for good.
@@ -348,9 +383,9 @@ class PersistentStepStore implements StepStore {
       _db.upsertHourlySteps(date, hour, steps);
 
   @override
-  Future<int?> readLastRaw() => _prefs.getLastRawSteps();
+  Future<LastRawReading?> readLastReading() => _prefs.getLastRawReading();
 
   @override
-  Future<void> writeLastRaw(int rawCumulative) =>
-      _prefs.setLastRawSteps(rawCumulative);
+  Future<void> writeLastReading(LastRawReading reading) =>
+      _prefs.setLastRawReading(reading);
 }

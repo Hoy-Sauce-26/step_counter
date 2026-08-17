@@ -1,8 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:step_counter/services/step_accumulator.dart';
 
-/// What the app would display for the day, given a baseline and a raw
-/// reading — mirrors the delta/correction arithmetic in `onServiceStart`.
 int displayedSteps({
   required int rawCumulative,
   required int baseline,
@@ -53,10 +51,75 @@ void main() {
       expect(displayedSteps(rawCumulative: 500000, baseline: baseline), 0);
     });
 
-    // The regression this whole function exists for: the hardware counter
-    // zeroes on reboot, so the saved baseline ends up far above the raw
-    // reading. Before the fix this left every delta clamped to 0, which
-    // overwrote the day's stored total and froze it there until midnight.
+    test('baselines a fresh day to the previous reading when there is one',
+        () {
+      final baseline = resolveBaselineValue(
+        rawCumulative: 503000,
+        sensorHasReset: false,
+        savedBaseline: null,
+        existingSteps: 0,
+        correctionFactor: 1.0,
+        previousRaw: 500000,
+      );
+
+      expect(baseline, 500000);
+      expect(
+        displayedSteps(rawCumulative: 503000, baseline: baseline),
+        3000,
+        reason: 'the steps batched since the last reading are the new day\'s',
+      );
+    });
+
+    test('carries the previous reading over through the correction factor',
+        () {
+      final baseline = resolveBaselineValue(
+        rawCumulative: 501000,
+        sensorHasReset: false,
+        savedBaseline: null,
+        existingSteps: 0,
+        correctionFactor: 0.9,
+        previousRaw: 500000,
+      );
+
+      expect(
+        displayedSteps(
+          rawCumulative: 501000,
+          baseline: baseline,
+          correctionFactor: 0.9,
+        ),
+        900,
+      );
+    });
+
+    test('ignores the previous reading after a reset', () {
+      final baseline = resolveBaselineValue(
+        rawCumulative: 40,
+        sensorHasReset: true,
+        savedBaseline: null,
+        existingSteps: 0,
+        correctionFactor: 1.0,
+        previousRaw: 500000,
+      );
+
+      expect(baseline, 40, reason: 'the counter restarted below the reading');
+      expect(displayedSteps(rawCumulative: 40, baseline: baseline), 0);
+    });
+
+    test('prefers a day\'s own saved baseline over the previous reading', () {
+      expect(
+        resolveBaselineValue(
+          rawCumulative: 500100,
+          sensorHasReset: false,
+          savedBaseline: 500000,
+          existingSteps: 100,
+          correctionFactor: 1.0,
+          previousRaw: 500050,
+        ),
+        500000,
+        reason: 'a day already under way is anchored, not re-anchored',
+      );
+    });
+
     test("a reboot mid-day keeps the day's total and resumes counting", () {
       final baseline = resolveBaselineValue(
         rawCumulative: 0,

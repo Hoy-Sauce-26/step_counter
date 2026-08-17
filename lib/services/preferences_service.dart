@@ -35,16 +35,32 @@ class PreferencesService {
     await prefs.setDouble(_correctionFactorKey, factor);
   }
 
-  static const _lastRawStepsKey = 'lastRawSteps';
+  static const _lastRawReadingKey = 'lastRawReading';
+  static const _legacyLastRawStepsKey = 'lastRawSteps';
+  static const _legacyLastRawStepsAtKey = 'lastRawStepsAt';
 
-  Future<int?> getLastRawSteps() async {
+  /// The last raw reading and when it arrived, as one value.
+  Future<LastRawReading?> getLastRawReading() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getInt(_lastRawStepsKey);
+    final combined = prefs.getString(_lastRawReadingKey);
+    if (combined != null) return LastRawReading.tryParse(combined);
+
+    // An install that predates the combined key. Without this the first
+    // reading after the update would have nothing to compare against, and a
+    // reboot in that window would go undetected.
+    // The next write supersedes these, and they are never read again.
+    final raw = prefs.getInt(_legacyLastRawStepsKey);
+    if (raw == null) return null;
+    final millis = prefs.getInt(_legacyLastRawStepsAtKey);
+    return LastRawReading(
+      raw: raw,
+      at: millis == null ? null : DateTime.fromMillisecondsSinceEpoch(millis),
+    );
   }
 
-  Future<void> setLastRawSteps(int rawCumulative) async {
+  Future<void> setLastRawReading(LastRawReading reading) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt(_lastRawStepsKey, rawCumulative);
+    await prefs.setString(_lastRawReadingKey, reading.encode());
   }
 
   /// The raw-sensor reading that counts as zero steps for [date]. Only the
@@ -190,5 +206,27 @@ class PreferencesService {
   Future<void> setManualSteps(String date, int steps) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt('manualSteps_$date', steps);
+  }
+}
+
+/// The last raw sensor reading, with the moment it arrived.
+class LastRawReading {
+  const LastRawReading({required this.raw, this.at});
+
+  final int raw;
+  final DateTime? at;
+
+  String encode() => '$raw@${at?.millisecondsSinceEpoch ?? ''}';
+
+  static LastRawReading? tryParse(String value) {
+    final separator = value.indexOf('@');
+    if (separator < 0) return null;
+    final raw = int.tryParse(value.substring(0, separator));
+    if (raw == null) return null;
+    final millis = int.tryParse(value.substring(separator + 1));
+    return LastRawReading(
+      raw: raw,
+      at: millis == null ? null : DateTime.fromMillisecondsSinceEpoch(millis),
+    );
   }
 }
