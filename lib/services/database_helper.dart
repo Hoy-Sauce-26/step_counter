@@ -21,28 +21,47 @@ class DatabaseHelper {
   DatabaseHelper._internal();
   static final DatabaseHelper instance = DatabaseHelper._internal();
 
-  static Database? _db;
+  static Future<Database>? _db;
 
   /// Full path to open instead of the app's own database file. Tests point
   /// this at an in-memory or temporary database; nothing else should set it.
   @visibleForTesting
   static String? databasePathOverride;
 
+  /// The only way to observe that concurrent callers share one open
+  @visibleForTesting
+  static int openCount = 0;
+
   /// Closes the cached connection so the next access opens a fresh one.
   /// Without this the singleton would carry one database across a whole test
   /// file, and no test could start from an empty schema.
   @visibleForTesting
   static Future<void> resetForTesting() async {
-    await _db?.close();
+    final pending = _db;
     _db = null;
+    if (pending == null) return;
+    try {
+      await (await pending).close();
+    } catch (_) {
+      // The open itself failed, so there is no connection to close. Swallowing
+      // it keeps a tearDown from masking the failure the test actually hit.
+    }
   }
 
-  Future<Database> get database async {
-    _db ??= await _initDatabase();
-    return _db!;
+  Future<Database> get database => _db ??= _open();
+
+  /// Un-caches itself if the open fails
+  Future<Database> _open() async {
+    try {
+      return await _initDatabase();
+    } catch (_) {
+      _db = null;
+      rethrow;
+    }
   }
 
   Future<Database> _initDatabase() async {
+    openCount++;
     final path =
         databasePathOverride ?? p.join(await getDatabasesPath(), 'step_counter.db');
     return openDatabase(

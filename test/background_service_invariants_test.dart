@@ -5,26 +5,8 @@ import 'package:flutter_test/flutter_test.dart';
 /// A guard, not a unit test: it reads the source of [_serviceSource] instead
 /// of calling into it, because the rule it protects can't be observed from a
 /// single isolate.
-///
-/// The background service runs in its own isolate, and SharedPreferences
-/// hands each isolate a private in-memory copy of the store. A setting the
-/// app writes is therefore invisible to the service. Settings that can change
-/// while it runs are read once at start-up and kept current by an `invoke`
-/// handler — so re-reading one further down doesn't refresh anything. It
-/// returns the start-up snapshot and silently reverts whatever was mirrored
-/// in since.
-///
-/// That has now happened twice in this file: the daily target never reached
-/// the isolate at all, and a re-read on date change was quietly reverting
-/// recalibrations to the value held when the service started. The README
-/// states an equivalent rule for the single step-count listener in prose, and
-/// by its own account that rule has been broken twice as well. This asserts
-/// it instead.
 const _serviceSource = 'lib/services/background_service.dart';
 
-/// Settings mirrored into the background isolate, as
-/// `accessor: invoke channel`. Add an entry here when a new setting starts
-/// being mirrored.
 const _mirroredSettings = <String, String>{
   'getDailyTarget': 'setDailyTarget',
   'getCorrectionFactor': 'setCorrectionFactor',
@@ -93,17 +75,19 @@ void main() {
       }
     });
 
-    test('every mirrored setting has an invoke handler', () {
+    test('every mirrored setting has a handler registered', () {
       final lines = _sourceLines();
 
-      for (final MapEntry(key: accessor, value: channel)
+      for (final MapEntry(key: accessor, value: channelName)
           in _mirroredSettings.entries) {
         expect(
-          lines.any((line) => line.contains("service.on('$channel')")),
+          lines.any((line) => line.contains('$channelName.handle(')),
           isTrue,
-          reason: 'No handler for "$channel" in $_serviceSource. Without one, '
-              'the value read from $accessor() at start-up never updates and '
-              'the app\'s changes never reach this isolate.',
+          reason: 'Nothing handles the "$channelName" channel in '
+              '$_serviceSource. Without a handler the value read from '
+              '$accessor() at start-up never updates, the app\'s changes are '
+              'accepted and dropped, and the service runs on its start-up '
+              'copy for as long as it lives.',
         );
       }
     });

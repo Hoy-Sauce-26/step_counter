@@ -7,6 +7,7 @@ import 'package:pedometer/pedometer.dart';
 import 'formatting.dart';
 import 'notification_service.dart';
 import 'preferences_service.dart';
+import 'service_channel.dart' as channel;
 import 'step_accumulator.dart';
 
 Future<void> initializeBackgroundService() async {
@@ -83,21 +84,18 @@ void onServiceStart(ServiceInstance service) async {
   }
 
   // The only way a recalibration reaches this isolate.
-  service.on('setCorrectionFactor').listen((event) {
-    final factor = (event?['factor'] as num?)?.toDouble();
-    if (factor != null) accumulator.correctionFactor = factor;
+  channel.setCorrectionFactor.handle(service, (factor) {
+    accumulator.correctionFactor = factor;
   });
 
   // Same deal for the target
-  service.on('setDailyTarget').listen((event) {
-    final target = (event?['target'] as num?)?.toInt();
-    if (target != null) dailyTarget = target;
-  });
+  channel.setDailyTarget.handle(service, (target) => dailyTarget = target);
 
-  service.on('startRoute').listen((event) async {
-    final id = event?['routeId'] as int?;
-    final name = event?['routeName'] as String?;
-    if (id == null || name == null) return;
+  // This isolate is the only writer of the stored active route. The app
+  // holds its own copy for the UI but must not persist it.
+  channel.startRoute.handle(service, (command) async {
+    final id = command.routeId;
+    final name = command.routeName;
     final startTime = DateTime.now();
     activeRoute = {
       'id': id,
@@ -115,7 +113,7 @@ void onServiceStart(ServiceInstance service) async {
     );
   });
 
-  service.on('stopRoute').listen((event) async {
+  channel.stopRoute.handle(service, () async {
     activeRoute = null;
     await prefsService.clearActiveRoute();
     // Revert the notification immediately rather than waiting for the
@@ -126,9 +124,7 @@ void onServiceStart(ServiceInstance service) async {
     );
   });
 
-  service.on('addManualSteps').listen((event) async {
-    final amount = event?['steps'] as int?;
-    if (amount == null) return;
+  channel.addManualSteps.handle(service, (amount) async {
     final creditedAt = DateTime.now();
     final newTotal = await accumulator.creditManualSteps(amount, creditedAt);
     if (newTotal == null) return;
@@ -140,10 +136,10 @@ void onServiceStart(ServiceInstance service) async {
         target: dailyTarget,
       );
     }
-    service.invoke('stepUpdate', {
-      'steps': newTotal,
-      'date': dateKey(creditedAt),
-    });
+    channel.stepUpdate.send(
+      service,
+      channel.StepUpdate(steps: newTotal, date: dateKey(creditedAt)),
+    );
   });
 
   // Schedule a single midnight timer instead of polling for it (skipped
@@ -158,7 +154,7 @@ void onServiceStart(ServiceInstance service) async {
     if (sensorStatusRecorded) return;
     sensorStatusRecorded = true;
     await prefsService.setStepSensorAvailable(available);
-    service.invoke('sensorStatus', {'available': available});
+    channel.sensorStatus.send(service, available);
     if (!available) {
       await NotificationService.showSensorUnavailableNotification();
     }
@@ -206,7 +202,7 @@ void onServiceStart(ServiceInstance service) async {
         steps: routeSteps,
         elapsed: now.difference(route['startTime'] as DateTime),
       );
-      service.invoke('routeUpdate', {'steps': routeSteps});
+      channel.routeUpdate.send(service, routeSteps);
     } else {
       await NotificationService.updateStepNotification(
         steps: displaySteps,
@@ -216,11 +212,11 @@ void onServiceStart(ServiceInstance service) async {
 
     // The date rides along so the app can tell a live figure from a stored
     // one when deciding which of the two is current.
-    service.invoke('stepUpdate', {
-      'steps': displaySteps,
-      'date': reading.date,
-    });
-    service.invoke('rawStep', {'raw': event.steps});
+    channel.stepUpdate.send(
+      service,
+      channel.StepUpdate(steps: displaySteps, date: reading.date),
+    );
+    channel.rawStep.send(service, event.steps);
   }, onError: (Object error) async {
     // Need this handler here for devices with no step sensor.
     await recordSensorStatus(false);

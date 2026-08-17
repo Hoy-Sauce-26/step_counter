@@ -9,6 +9,7 @@ import 'formatting.dart';
 import 'metrics.dart';
 import 'pedometer_service.dart';
 import 'preferences_service.dart';
+import 'service_channel.dart' as channel;
 
 final pedometerServiceProvider = Provider<PedometerService>((ref) {
   final service = PedometerService();
@@ -247,22 +248,19 @@ class ActiveRouteNotifier extends Notifier<ActiveRoute?> {
       routeName: routeName,
       startTime: startTime,
     );
-    await ref.read(preferencesServiceProvider).setActiveRoute(
-          routeId: routeId,
-          routeName: routeName,
-          startTime: startTime,
-        );
-    FlutterBackgroundService().invoke('startRoute', {
-      'routeId': routeId,
-      'routeName': routeName,
-    });
+    channel.startRoute.send(
+      FlutterBackgroundService(),
+      channel.StartRoute(routeId: routeId, routeName: routeName),
+    );
   }
 
   Future<void> stopRoute() async {
     state = null;
     ref.read(pedometerServiceProvider).clearActiveRouteSteps();
+    // Cleared from both sides, unlike the write above. Clearing is
+    // idempotent and can only end a route.
     await ref.read(preferencesServiceProvider).clearActiveRoute();
-    FlutterBackgroundService().invoke('stopRoute');
+    channel.stopRoute.send(FlutterBackgroundService());
   }
 }
 
