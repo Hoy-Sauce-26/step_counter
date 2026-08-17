@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../models/saved_route.dart';
+import '../services/formatting.dart';
 import '../services/metrics.dart';
 import '../services/providers.dart';
 
@@ -66,6 +67,7 @@ class _RoutesListState extends ConsumerState<_RoutesList> {
     setState(() => _pendingDeletes.add(route.id));
     await ref.read(databaseHelperProvider).deleteRoute(route.id);
     ref.invalidate(routesProvider);
+    if (mounted) setState(() => _pendingDeletes.remove(route.id));
   }
 
   Future<void> _logToday(SavedRoute route) async {
@@ -334,17 +336,19 @@ class _ActiveRouteView extends ConsumerStatefulWidget {
 class _ActiveRouteViewState extends ConsumerState<_ActiveRouteView> {
   Timer? _ticker;
 
-  // Non-null means "reviewing the Stop Route summary". Setting this is all
-  // "Stop Route" does — the route is still genuinely active underneath
-  // until "Done" commits it; "Resume" just clears this back to null.
+  // Non-null means "reviewing the Stop Route summary".
   _RouteSnapshot? _summary;
 
   @override
   void initState() {
     super.initState();
+    // Only drives the elapsed-time readout, which is frozen while the stop
+    // summary is up — no point repainting the screen once a second behind it.
     _ticker = Timer.periodic(
       const Duration(seconds: 1),
-      (_) => setState(() {}),
+      (_) {
+        if (_summary == null) setState(() {});
+      },
     );
   }
 
@@ -381,7 +385,7 @@ class _ActiveRouteViewState extends ConsumerState<_ActiveRouteView> {
     final db = ref.read(databaseHelperProvider);
     await db.insertRouteSession(
       routeId: widget.activeRoute.routeId,
-      date: _todayString(),
+      date: todayKey(),
       steps: summary.steps,
       durationSeconds: summary.elapsed.inSeconds,
     );
@@ -431,21 +435,7 @@ class _ActiveRouteViewState extends ConsumerState<_ActiveRouteView> {
     await ref.read(activeRouteProvider.notifier).stopRoute();
   }
 
-  String _todayString() {
-    final now = DateTime.now();
-    return '${now.year.toString().padLeft(4, '0')}-'
-        '${now.month.toString().padLeft(2, '0')}-'
-        '${now.day.toString().padLeft(2, '0')}';
-  }
 
-  String _formatDuration(Duration d) {
-    final h = d.inHours;
-    final m = d.inMinutes % 60;
-    final s = d.inSeconds % 60;
-    final mStr = m.toString().padLeft(2, '0');
-    final sStr = s.toString().padLeft(2, '0');
-    return h > 0 ? '${h}h ${mStr}m ${sStr}s' : '${m}m ${sStr}s';
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -482,7 +472,7 @@ class _ActiveRouteViewState extends ConsumerState<_ActiveRouteView> {
             ),
             Text('steps', style: theme.textTheme.bodyMedium),
             const SizedBox(height: 24),
-            Text(_formatDuration(elapsed), style: theme.textTheme.headlineSmall),
+            Text(formatDuration(elapsed), style: theme.textTheme.headlineSmall),
             const SizedBox(height: 12),
             Row(
               mainAxisAlignment: MainAxisAlignment.center,

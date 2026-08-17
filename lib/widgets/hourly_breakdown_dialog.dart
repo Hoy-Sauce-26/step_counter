@@ -1,3 +1,4 @@
+import '../services/formatting.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -8,9 +9,7 @@ import 'charts/hourly_bar_chart.dart';
 /// Shows a modal with [date]'s (ISO-8601, e.g. "2026-08-11") hourly step
 /// breakdown, fetched live via [hourlyStepsForDateProvider].
 void showHourlyBreakdownDialog(BuildContext context, DateTime date) {
-  final dateStr = '${date.year.toString().padLeft(4, '0')}-'
-      '${date.month.toString().padLeft(2, '0')}-'
-      '${date.day.toString().padLeft(2, '0')}';
+  final dateStr = dateKey(date);
 
   showDialog(
     context: context,

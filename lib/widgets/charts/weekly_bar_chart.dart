@@ -6,6 +6,8 @@ import 'package:intl/intl.dart';
 
 import '../../models/daily_steps.dart';
 
+import 'chart_axis.dart';
+
 /// Bar chart for the past 7 days.
 ///
 /// - Y-axis floors at [dailyTarget], only growing if a day beat it, so
@@ -37,7 +39,7 @@ class WeeklyBarChart extends StatelessWidget {
         : last7Days.map((d) => d.stepCount).reduce((a, b) => a > b ? a : b);
     final axisCeiling = max(dailyTarget, highestSteps);
     final maxY = axisCeiling <= 0 ? 1.0 : axisCeiling * 1.15;
-    final interval = _niceInterval(maxY);
+    final interval = niceInterval(maxY, emptyFallback: 1000);
 
     return SizedBox(
       height: 240,
@@ -69,25 +71,10 @@ class WeeklyBarChart extends StatelessWidget {
           ]),
           titlesData: FlTitlesData(
             leftTitles: AxisTitles(
-              sideTitles: SideTitles(
-                showTitles: true,
-                reservedSize: 44,
+              sideTitles: stepCountAxis(
                 interval: interval,
-                getTitlesWidget: (value, meta) {
-                  if (value < 0) return const SizedBox.shrink();
-                  // fl_chart always adds a label at the axis max, which
-                  // usually isn't a clean interval multiple and ends up
-                  // overlapping the nearest tick label. Only draw labels
-                  // that land on our interval.
-                  final remainder = value % interval;
-                  final onInterval =
-                      remainder < 0.5 || (interval - remainder) < 0.5;
-                  if (!onInterval) return const SizedBox.shrink();
-                  return Text(
-                    NumberFormat.compact().format(value),
-                    style: theme.textTheme.labelSmall,
-                  );
-                },
+                reservedSize: 44,
+                labelStyle: theme.textTheme.labelSmall,
               ),
             ),
             rightTitles: const AxisTitles(
@@ -151,16 +138,5 @@ class WeeklyBarChart extends StatelessWidget {
         ),
       ),
     );
-  }
-
-  /// Picks a "nice" gridline interval (1/2/5 × a power of ten) targeting
-  /// roughly 4 gridlines across the chart.
-  double _niceInterval(double maxY) {
-    if (maxY <= 0) return 1000;
-    final rough = maxY / 4;
-    final magnitude = pow(10, (log(rough) / ln10).floor()).toDouble();
-    final residual = rough / magnitude;
-    final niceResidual = residual >= 5 ? 5.0 : (residual >= 2 ? 2.0 : 1.0);
-    return niceResidual * magnitude;
   }
 }

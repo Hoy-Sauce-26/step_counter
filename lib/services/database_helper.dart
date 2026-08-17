@@ -3,6 +3,7 @@ import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
 
 import '../models/daily_steps.dart';
+import 'formatting.dart';
 import '../models/hourly_steps.dart';
 import '../models/saved_route.dart';
 
@@ -137,7 +138,7 @@ class DatabaseHelper {
     final now = DateTime.now();
     final start = DateTime(now.year, now.month, now.day)
         .subtract(Duration(days: days - 1));
-    final startStr = _formatDate(start);
+    final startStr = dateKey(start);
 
     final rows = await db.query(
       'daily_steps',
@@ -146,12 +147,6 @@ class DatabaseHelper {
       orderBy: 'date ASC',
     );
     return rows.map(DailySteps.fromMap).toList();
-  }
-
-  static String _formatDate(DateTime d) {
-    return '${d.year.toString().padLeft(4, '0')}-'
-        '${d.month.toString().padLeft(2, '0')}-'
-        '${d.day.toString().padLeft(2, '0')}';
   }
 
   /// Insert/update a single hour's running total for a given date.
@@ -208,8 +203,7 @@ class DatabaseHelper {
     final db = await database;
     final rows = await db.rawQuery('''
       SELECT r.id, r.name,
-             AVG(s.steps) AS avgSteps,
-             COUNT(s.id) AS sessionCount
+             AVG(s.steps) AS avgSteps
       FROM routes r
       LEFT JOIN route_sessions s ON s.routeId = r.id
       GROUP BY r.id
@@ -220,7 +214,6 @@ class DatabaseHelper {
               id: row['id'] as int,
               name: row['name'] as String,
               avgSteps: (row['avgSteps'] as num?)?.toDouble(),
-              sessionCount: (row['sessionCount'] as num).toInt(),
             ))
         .toList();
   }

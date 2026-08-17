@@ -11,8 +11,9 @@ class PreferencesService {
   static const _correctionFactorKey = 'stepCorrectionFactor';
   static const int defaultDailyTarget = 10000;
 
-  /// 1.0 = trust the sensor as-is; e.g. 0.93 scales readings down 7%.
   static const double defaultCorrectionFactor = 1.0;
+  static const double minCorrectionFactor = 0.9;
+  static const double maxCorrectionFactor = 1.1;
 
   Future<int> getDailyTarget() async {
     final prefs = await SharedPreferences.getInstance();

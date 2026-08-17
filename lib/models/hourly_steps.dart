@@ -10,14 +10,6 @@ class HourlySteps {
     required this.stepCount,
   });
 
-  Map<String, dynamic> toMap() {
-    return {
-      'date': date,
-      'hour': hour,
-      'stepCount': stepCount,
-    };
-  }
-
   factory HourlySteps.fromMap(Map<String, dynamic> map) {
     return HourlySteps(
       date: map['date'] as String,

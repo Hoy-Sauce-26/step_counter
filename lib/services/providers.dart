@@ -5,6 +5,7 @@ import '../models/daily_steps.dart';
 import '../models/hourly_steps.dart';
 import '../models/saved_route.dart';
 import 'database_helper.dart';
+import 'formatting.dart';
 import 'metrics.dart';
 import 'pedometer_service.dart';
 import 'preferences_service.dart';
@@ -45,98 +46,91 @@ final walkingStatusProvider = StreamProvider<String>((ref) {
   return service.walkingStatusStream;
 });
 
+abstract class SettingNotifier<T> extends Notifier<T> {
+  /// Shown until [load] returns — reads are synchronous, so there has to be
+  /// something to show first.
+  T get fallback;
+
+  Future<T> load(PreferencesService prefs);
+  Future<void> save(T value);
+
+  PreferencesService get prefs => ref.read(preferencesServiceProvider);
+  PedometerService get pedometer => ref.read(pedometerServiceProvider);
+
+  @override
+  T build() {
+    _hydrate();
+    return fallback;
+  }
+
+  Future<void> _hydrate() async => state = await load(prefs);
+
+  Future<void> update(T value) async {
+    state = value;
+    await save(value);
+  }
+}
+
 /// The user's configured daily step target (defaults to 10,000).
 final dailyTargetProvider = NotifierProvider<DailyTargetNotifier, int>(
   DailyTargetNotifier.new,
 );
 
-class DailyTargetNotifier extends Notifier<int> {
+class DailyTargetNotifier extends SettingNotifier<int> {
   @override
-  int build() {
-    _load();
-    return PreferencesService.defaultDailyTarget;
-  }
+  int get fallback => PreferencesService.defaultDailyTarget;
 
-  Future<void> _load() async {
-    state = await ref.read(preferencesServiceProvider).getDailyTarget();
-  }
+  @override
+  Future<int> load(PreferencesService prefs) => prefs.getDailyTarget();
 
-  Future<void> setTarget(int target) async {
-    state = target;
-    // Routed through PedometerService, not PreferencesService, so the write
-    // is mirrored to the background isolate — same as [CalibrationFactorNotifier].
-    await ref.read(pedometerServiceProvider).setDailyTarget(target);
-  }
+  @override
+  Future<void> save(int value) => pedometer.setDailyTarget(value);
 }
 
-/// The user's step-count calibration factor (1.0 = trust the sensor as-is).
 final calibrationFactorProvider =
     NotifierProvider<CalibrationFactorNotifier, double>(
   CalibrationFactorNotifier.new,
 );
 
-class CalibrationFactorNotifier extends Notifier<double> {
+class CalibrationFactorNotifier extends SettingNotifier<double> {
   @override
-  double build() {
-    _load();
-    return PreferencesService.defaultCorrectionFactor;
-  }
+  double get fallback => PreferencesService.defaultCorrectionFactor;
 
-  Future<void> _load() async {
-    state = await ref.read(preferencesServiceProvider).getCorrectionFactor();
-  }
+  @override
+  Future<double> load(PreferencesService prefs) => prefs.getCorrectionFactor();
 
-  Future<void> setFactor(double factor) async {
-    state = factor;
-    await ref.read(pedometerServiceProvider).setCorrectionFactor(factor);
-  }
+  @override
+  Future<void> save(double value) => pedometer.setCorrectionFactor(value);
 }
 
-/// Height in cm, if personalized. Null uses the flat-rate default — see
-/// StepMetrics.distanceKm.
-final heightCmProvider =
-    NotifierProvider<HeightCmNotifier, double?>(
+final heightCmProvider = NotifierProvider<HeightCmNotifier, double?>(
   HeightCmNotifier.new,
 );
 
-class HeightCmNotifier extends Notifier<double?> {
+class HeightCmNotifier extends SettingNotifier<double?> {
   @override
-  double? build() {
-    _load();
-    return null;
-  }
+  double? get fallback => null;
 
-  Future<void> _load() async {
-    state = await ref.read(preferencesServiceProvider).getHeightCm();
-  }
+  @override
+  Future<double?> load(PreferencesService prefs) => prefs.getHeightCm();
 
-  Future<void> setHeight(double? cm) async {
-    state = cm;
-    await ref.read(preferencesServiceProvider).setHeightCm(cm);
-  }
+  @override
+  Future<void> save(double? value) => prefs.setHeightCm(value);
 }
 
-/// Weight in kg, if personalized. Null uses the flat-rate default — see
-/// StepMetrics.calories.
 final weightKgProvider = NotifierProvider<WeightKgNotifier, double?>(
   WeightKgNotifier.new,
 );
 
-class WeightKgNotifier extends Notifier<double?> {
+class WeightKgNotifier extends SettingNotifier<double?> {
   @override
-  double? build() {
-    _load();
-    return null;
-  }
+  double? get fallback => null;
 
-  Future<void> _load() async {
-    state = await ref.read(preferencesServiceProvider).getWeightKg();
-  }
+  @override
+  Future<double?> load(PreferencesService prefs) => prefs.getWeightKg();
 
-  Future<void> setWeight(double? kg) async {
-    state = kg;
-    await ref.read(preferencesServiceProvider).setWeightKg(kg);
-  }
+  @override
+  Future<void> save(double? value) => prefs.setWeightKg(value);
 }
 
 /// Which unit system to display values in throughout the app.
@@ -144,26 +138,19 @@ final unitSystemProvider = NotifierProvider<UnitSystemNotifier, UnitSystem>(
   UnitSystemNotifier.new,
 );
 
-class UnitSystemNotifier extends Notifier<UnitSystem> {
+class UnitSystemNotifier extends SettingNotifier<UnitSystem> {
   @override
-  UnitSystem build() {
-    _load();
-    return UnitSystem.metric; // Defaults to metric.
-  }
+  UnitSystem get fallback => UnitSystem.metric;
 
-  Future<void> _load() async {
-    state = await ref.read(preferencesServiceProvider).getUnitSystem();
-  }
+  @override
+  Future<UnitSystem> load(PreferencesService prefs) => prefs.getUnitSystem();
 
-  Future<void> setSystem(UnitSystem system) async {
-    state = system;
-    await ref.read(preferencesServiceProvider).setUnitSystem(system);
-  }
+  @override
+  Future<void> save(UnitSystem value) => prefs.setUnitSystem(value);
 }
 
 /// Zero-filled past 7 days, chronological. Re-fetches on app start and
-/// every 100 steps (not every step) so the chart doesn't redraw
-/// constantly while walking.
+/// every 100 steps (not every step).
 final _chartRefreshBucketProvider = Provider.autoDispose<int>((ref) {
   final steps = ref.watch(todayStepsProvider).value ?? 0;
   return steps ~/ 100;
@@ -180,25 +167,15 @@ final past7DaysProvider =
   final today = DateTime(now.year, now.month, now.day);
 
   return List.generate(7, (i) {
-    final d = today.subtract(Duration(days: 6 - i));
-    final dateStr = '${d.year.toString().padLeft(4, '0')}-'
-        '${d.month.toString().padLeft(2, '0')}-'
-        '${d.day.toString().padLeft(2, '0')}';
+    final dateStr = dateKey(today.subtract(Duration(days: 6 - i)));
     return DailySteps(date: dateStr, stepCount: byDate[dateStr] ?? 0);
   });
 });
 
-/// Zero-filled 24-hour breakdown for a date (ISO-8601, e.g. "2026-08-11").
-/// Refreshes on the same throttled cadence as [past7DaysProvider] for
-/// today; historical dates are static once fetched.
 final hourlyStepsForDateProvider =
     FutureProvider.autoDispose.family<List<HourlySteps>, String>(
   (ref, date) async {
-    final today = DateTime.now();
-    final todayStr = '${today.year.toString().padLeft(4, '0')}-'
-        '${today.month.toString().padLeft(2, '0')}-'
-        '${today.day.toString().padLeft(2, '0')}';
-    if (date == todayStr) {
+    if (date == todayKey()) {
       ref.watch(_chartRefreshBucketProvider);
     }
 
@@ -237,8 +214,7 @@ class ActiveRoute {
 }
 
 /// The route currently being tracked, or null. Persisted to survive an app
-/// restart, and mirrored to the background service (the source of truth
-/// for live steps/notification) — same pattern as [CalibrationFactorNotifier].
+/// restart, and mirrored to the background service.
 final activeRouteProvider =
     NotifierProvider<ActiveRouteNotifier, ActiveRoute?>(
   ActiveRouteNotifier.new,

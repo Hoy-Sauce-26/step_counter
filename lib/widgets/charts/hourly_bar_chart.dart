@@ -1,10 +1,10 @@
-import 'dart:math';
 
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 
 import '../../models/hourly_steps.dart';
+
+import 'chart_axis.dart';
 
 /// Bar chart for a single day's hourly breakdown: 24 bars, one per hour.
 /// No target-based coloring — target is a daily concept, not hourly.
@@ -20,7 +20,7 @@ class HourlyBarChart extends StatelessWidget {
         ? 0
         : hours.map((h) => h.stepCount).reduce((a, b) => a > b ? a : b);
     final maxY = maxSteps <= 0 ? 1.0 : maxSteps * 1.2;
-    final interval = _niceInterval(maxY);
+    final interval = niceInterval(maxY, emptyFallback: 100);
 
     return SizedBox(
       height: 220,
@@ -41,24 +41,10 @@ class HourlyBarChart extends StatelessWidget {
           ),
           titlesData: FlTitlesData(
             leftTitles: AxisTitles(
-              sideTitles: SideTitles(
-                showTitles: true,
-                reservedSize: 40,
+              sideTitles: stepCountAxis(
                 interval: interval,
-                getTitlesWidget: (value, meta) {
-                  if (value < 0) return const SizedBox.shrink();
-                  // Same fix as the weekly chart's y-axis — only draw
-                  // labels that land on our interval, avoiding overlap
-                  // with fl_chart's auto label at the axis max.
-                  final remainder = value % interval;
-                  final onInterval =
-                      remainder < 0.5 || (interval - remainder) < 0.5;
-                  if (!onInterval) return const SizedBox.shrink();
-                  return Text(
-                    NumberFormat.compact().format(value),
-                    style: theme.textTheme.labelSmall,
-                  );
-                },
+                reservedSize: 40,
+                labelStyle: theme.textTheme.labelSmall,
               ),
             ),
             rightTitles: const AxisTitles(
@@ -119,12 +105,4 @@ class HourlyBarChart extends StatelessWidget {
     return hour < 12 ? '${hour}a' : '${hour - 12}p';
   }
 
-  double _niceInterval(double maxY) {
-    if (maxY <= 0) return 100;
-    final rough = maxY / 4;
-    final magnitude = pow(10, (log(rough) / ln10).floor()).toDouble();
-    final residual = rough / magnitude;
-    final niceResidual = residual >= 5 ? 5.0 : (residual >= 2 ? 2.0 : 1.0);
-    return niceResidual * magnitude;
-  }
 }

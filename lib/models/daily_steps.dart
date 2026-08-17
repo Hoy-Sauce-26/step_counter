@@ -23,12 +23,5 @@ class DailySteps {
     );
   }
 
-  DailySteps copyWith({String? date, int? stepCount}) {
-    return DailySteps(
-      date: date ?? this.date,
-      stepCount: stepCount ?? this.stepCount,
-    );
-  }
-
   DateTime get dateTime => DateTime.parse(date);
 }

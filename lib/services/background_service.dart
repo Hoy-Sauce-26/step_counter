@@ -4,12 +4,10 @@ import 'dart:ui';
 import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:pedometer/pedometer.dart';
+import 'formatting.dart';
 import 'notification_service.dart';
 import 'preferences_service.dart';
 import 'step_accumulator.dart';
-
-const backgroundNotificationChannelId = 'step_counter_channel';
-const backgroundNotificationId = 888;
 
 Future<void> initializeBackgroundService() async {
   final service = FlutterBackgroundService();
@@ -22,10 +20,10 @@ Future<void> initializeBackgroundService() async {
       autoStartOnBoot: true,
       // Can't a dataSync foreground service from BOOT_COMPLETED
       foregroundServiceTypes: [AndroidForegroundType.health],
-      notificationChannelId: backgroundNotificationChannelId,
+      notificationChannelId: NotificationService.channelId,
       initialNotificationTitle: 'Roamfree',
       initialNotificationContent: 'Starting…',
-      foregroundServiceNotificationId: backgroundNotificationId,
+      foregroundServiceNotificationId: NotificationService.notificationId,
     ),
     // No iOS equivalent for this feature — see prior discussion.
     iosConfiguration: IosConfiguration(),
@@ -144,7 +142,6 @@ void onServiceStart(ServiceInstance service) async {
     }
     service.invoke('stepUpdate', {
       'steps': newTotal,
-      'target': dailyTarget,
       'date': dateKey(creditedAt),
     });
   });
@@ -221,7 +218,6 @@ void onServiceStart(ServiceInstance service) async {
     // one when deciding which of the two is current.
     service.invoke('stepUpdate', {
       'steps': displaySteps,
-      'target': dailyTarget,
       'date': reading.date,
     });
     service.invoke('rawStep', {'raw': event.steps});

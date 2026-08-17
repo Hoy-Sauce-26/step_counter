@@ -118,7 +118,6 @@ class _HomePageState extends ConsumerState<HomePage>
   Widget _body({
     required AsyncValue<int> stepsAsync,
     required int target,
-    required String? walkingStatus,
     required double? heightCm,
     required double? weightKg,
     required UnitSystem unitSystem,
@@ -141,7 +140,6 @@ class _HomePageState extends ConsumerState<HomePage>
       data: (steps) => _StepContent(
         steps: steps,
         target: target,
-        walkingStatus: walkingStatus,
         heightCm: heightCm,
         weightKg: weightKg,
         unitSystem: unitSystem,
@@ -171,7 +169,8 @@ class _HomePageState extends ConsumerState<HomePage>
     final weightKg = ref.watch(weightKgProvider);
     final unitSystem = ref.watch(unitSystemProvider);
     final stepsAsync = ref.watch(todayStepsProvider);
-    final walkingStatus = ref.watch(walkingStatusProvider).value;
+
+    ref.watch(walkingStatusProvider);
     final sensorAvailable = ref.watch(stepSensorAvailableProvider).value;
 
     return Scaffold(
@@ -191,13 +190,13 @@ class _HomePageState extends ConsumerState<HomePage>
               if (result != null) {
                 ref
                     .read(heightCmProvider.notifier)
-                    .setHeight(result.heightCm);
+                    .update(result.heightCm);
                 ref
                     .read(weightKgProvider.notifier)
-                    .setWeight(result.weightKg);
+                    .update(result.weightKg);
                 ref
                     .read(unitSystemProvider.notifier)
-                    .setSystem(result.unitSystem);
+                    .update(result.unitSystem);
               }
             },
           ),
@@ -214,7 +213,7 @@ class _HomePageState extends ConsumerState<HomePage>
               if (newFactor != null) {
                 ref
                     .read(calibrationFactorProvider.notifier)
-                    .setFactor(newFactor);
+                    .update(newFactor);
               }
             },
           ),
@@ -224,7 +223,7 @@ class _HomePageState extends ConsumerState<HomePage>
             onPressed: () async {
               final newTarget = await showEditTargetDialog(context, target);
               if (newTarget != null) {
-                ref.read(dailyTargetProvider.notifier).setTarget(newTarget);
+                ref.read(dailyTargetProvider.notifier).update(newTarget);
               }
             },
           ),
@@ -243,7 +242,6 @@ class _HomePageState extends ConsumerState<HomePage>
         child: _body(
           stepsAsync: stepsAsync,
           target: target,
-          walkingStatus: walkingStatus,
           heightCm: heightCm,
           weightKg: weightKg,
           unitSystem: unitSystem,
@@ -257,7 +255,6 @@ class _HomePageState extends ConsumerState<HomePage>
 class _StepContent extends ConsumerWidget {
   final int steps;
   final int target;
-  final String? walkingStatus;
   final double? heightCm;
   final double? weightKg;
   final UnitSystem unitSystem;
@@ -265,7 +262,6 @@ class _StepContent extends ConsumerWidget {
   const _StepContent({
     required this.steps,
     required this.target,
-    this.walkingStatus,
     this.heightCm,
     this.weightKg,
     required this.unitSystem,
