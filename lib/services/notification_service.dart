@@ -3,16 +3,11 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'formatting.dart';
 
 class NotificationService {
-  /// The channel id is a durable identifier: users' per-channel settings hang
-  /// off it, so changing it orphans their choices and quietly creates a second
-  /// channel. The name is display text and is safe to change.
-  static const String channelId = 'step_counter_channel';
+  static const String channelId = 'step_counter_channel'; // don't touch.
   static const String channelName = 'Step tracking';
   static const String channelDescription =
       'Ongoing daily step counter notification';
 
-  /// One id for one ongoing notification — the foreground service's and this
-  /// service's must match, or the service's placeholder never gets replaced.
   static const int notificationId = 888;
 
   static final FlutterLocalNotificationsPlugin _notificationsPlugin =

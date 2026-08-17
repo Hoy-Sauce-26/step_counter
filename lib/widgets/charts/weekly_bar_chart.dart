@@ -139,7 +139,4 @@ class WeeklyBarChart extends StatelessWidget {
       ),
     );
   }
-
-  /// Picks a "nice" gridline interval (1/2/5 × a power of ten) targeting
-  /// roughly 4 gridlines across the chart.
 }

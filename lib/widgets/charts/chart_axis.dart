@@ -5,10 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 /// A round number to step the y-axis by, aiming for roughly four gridlines.
-///
-/// [emptyFallback] is what to use when there is nothing to scale to — the
-/// charts differ there, since a day of steps and a single hour of them sit at
-/// different magnitudes.
 double niceInterval(double maxY, {required double emptyFallback}) {
   if (maxY <= 0) return emptyFallback;
   final rough = maxY / 4;
@@ -18,11 +14,8 @@ double niceInterval(double maxY, {required double emptyFallback}) {
   return niceResidual * magnitude;
 }
 
-/// Y-axis labels drawn only on multiples of [interval].
-///
 /// fl_chart always adds a label at the axis maximum, which is usually not a
-/// clean multiple and collides with the nearest real tick. Suppressing
-/// everything off-interval is what keeps the two from overlapping.
+/// clean multiple and collides with the nearest real tick.
 SideTitles stepCountAxis({
   required double interval,
   required double reservedSize,

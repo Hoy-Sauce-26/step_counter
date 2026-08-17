@@ -1,13 +1,4 @@
-// Shared display and storage formatting.
-//
-// Both of these had drifted into half a dozen private copies apiece, which is
-// how a storage key ends up with two definitions that agree today and not
-// next year.
-
-/// A day as `yyyy-MM-dd` — the key every stored step total is filed under.
-///
-/// Deliberately local time, never UTC: a day rolls over when it does for the
-/// person walking, not at midnight in Greenwich.
+/// A day as `yyyy-MM-dd` — never UTC, Colin. I know how much you like UTC.
 String dateKey(DateTime moment) {
   return '${moment.year.toString().padLeft(4, '0')}-'
       '${moment.month.toString().padLeft(2, '0')}-'

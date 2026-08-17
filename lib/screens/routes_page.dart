@@ -67,10 +67,6 @@ class _RoutesListState extends ConsumerState<_RoutesList> {
     setState(() => _pendingDeletes.add(route.id));
     await ref.read(databaseHelperProvider).deleteRoute(route.id);
     ref.invalidate(routesProvider);
-    // Stop hiding it once it is genuinely gone. The set only exists to cover
-    // the gap before the refetch lands; keeping ids in it forever means every
-    // rebuild filters a list against a set that grows for the life of the
-    // screen, and an id reused by SQLite would hide the wrong route.
     if (mounted) setState(() => _pendingDeletes.remove(route.id));
   }
 
@@ -340,9 +336,7 @@ class _ActiveRouteView extends ConsumerStatefulWidget {
 class _ActiveRouteViewState extends ConsumerState<_ActiveRouteView> {
   Timer? _ticker;
 
-  // Non-null means "reviewing the Stop Route summary". Setting this is all
-  // "Stop Route" does — the route is still genuinely active underneath
-  // until "Done" commits it; "Resume" just clears this back to null.
+  // Non-null means "reviewing the Stop Route summary".
   _RouteSnapshot? _summary;
 
   @override

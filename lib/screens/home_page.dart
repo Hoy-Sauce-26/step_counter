@@ -169,8 +169,7 @@ class _HomePageState extends ConsumerState<HomePage>
     final weightKg = ref.watch(weightKgProvider);
     final unitSystem = ref.watch(unitSystemProvider);
     final stepsAsync = ref.watch(todayStepsProvider);
-    // Watched for its side effect, not its value: dropping the subscription
-    // made step readings arrive in laggy batches. See the README.
+
     ref.watch(walkingStatusProvider);
     final sensorAvailable = ref.watch(stepSensorAvailableProvider).value;
 

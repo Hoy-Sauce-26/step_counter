@@ -46,16 +46,6 @@ final walkingStatusProvider = StreamProvider<String>((ref) {
   return service.walkingStatusStream;
 });
 
-/// Every user setting follows the same shape: show a default immediately,
-/// replace it with the stored value once that loads, and write through on
-/// change. Five copies of it had accumulated, differing only in which pair of
-/// accessors they called.
-///
-/// [save] is a hook rather than a fixed call because two of these are not
-/// simply stored — the daily target and the correction factor go through
-/// [PedometerService], which mirrors them into the background isolate. It
-/// cannot read them from storage there, so a plain write would leave the
-/// service running on its start-up copy.
 abstract class SettingNotifier<T> extends Notifier<T> {
   /// Shown until [load] returns — reads are synchronous, so there has to be
   /// something to show first.
@@ -97,7 +87,6 @@ class DailyTargetNotifier extends SettingNotifier<int> {
   Future<void> save(int value) => pedometer.setDailyTarget(value);
 }
 
-/// The user's step-count calibration factor (1.0 = trust the sensor as-is).
 final calibrationFactorProvider =
     NotifierProvider<CalibrationFactorNotifier, double>(
   CalibrationFactorNotifier.new,
@@ -114,8 +103,6 @@ class CalibrationFactorNotifier extends SettingNotifier<double> {
   Future<void> save(double value) => pedometer.setCorrectionFactor(value);
 }
 
-/// Height in cm, if personalized. Null uses the flat-rate default — see
-/// StepMetrics.distanceKm.
 final heightCmProvider = NotifierProvider<HeightCmNotifier, double?>(
   HeightCmNotifier.new,
 );
@@ -131,8 +118,6 @@ class HeightCmNotifier extends SettingNotifier<double?> {
   Future<void> save(double? value) => prefs.setHeightCm(value);
 }
 
-/// Weight in kg, if personalized. Null uses the flat-rate default — see
-/// StepMetrics.calories.
 final weightKgProvider = NotifierProvider<WeightKgNotifier, double?>(
   WeightKgNotifier.new,
 );
@@ -165,8 +150,7 @@ class UnitSystemNotifier extends SettingNotifier<UnitSystem> {
 }
 
 /// Zero-filled past 7 days, chronological. Re-fetches on app start and
-/// every 100 steps (not every step) so the chart doesn't redraw
-/// constantly while walking.
+/// every 100 steps (not every step).
 final _chartRefreshBucketProvider = Provider.autoDispose<int>((ref) {
   final steps = ref.watch(todayStepsProvider).value ?? 0;
   return steps ~/ 100;
@@ -188,9 +172,6 @@ final past7DaysProvider =
   });
 });
 
-/// Zero-filled 24-hour breakdown for a date (ISO-8601, e.g. "2026-08-11").
-/// Refreshes on the same throttled cadence as [past7DaysProvider] for
-/// today; historical dates are static once fetched.
 final hourlyStepsForDateProvider =
     FutureProvider.autoDispose.family<List<HourlySteps>, String>(
   (ref, date) async {
@@ -233,8 +214,7 @@ class ActiveRoute {
 }
 
 /// The route currently being tracked, or null. Persisted to survive an app
-/// restart, and mirrored to the background service (the source of truth
-/// for live steps/notification) — same pattern as [CalibrationFactorNotifier].
+/// restart, and mirrored to the background service.
 final activeRouteProvider =
     NotifierProvider<ActiveRouteNotifier, ActiveRoute?>(
   ActiveRouteNotifier.new,
