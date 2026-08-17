@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:step_counter/services/preferences_service.dart';
 import 'package:step_counter/services/step_accumulator.dart';
 
 /// In-memory [StepStore]. The whole reason the accumulator takes a store
@@ -10,7 +11,7 @@ class FakeStepStore implements StepStore {
   final Map<String, int> manual = {};
   final Map<String, int> daily = {};
   final Map<String, int> hourly = {};
-  int? lastRaw;
+  LastRawReading? lastReading;
 
   String _hourKey(String date, int hour) => '$date@$hour';
 
@@ -47,10 +48,13 @@ class FakeStepStore implements StepStore {
       hourly[_hourKey(date, hour)] = steps;
 
   @override
-  Future<int?> readLastRaw() async => lastRaw;
+  Future<LastRawReading?> readLastReading() async => lastReading;
 
   @override
-  Future<void> writeLastRaw(int rawCumulative) async => lastRaw = rawCumulative;
+  Future<void> writeLastReading(LastRawReading reading) async =>
+      lastReading = reading;
+
+
 }
 
 final day1 = DateTime(2026, 8, 16, 9);
@@ -93,6 +97,7 @@ void main() {
       await accumulator.record(1000, day1);
       await accumulator.record(1500, day1);
 
+      // A whole day passes between the two readings
       final reading = await accumulator.record(1600, day2);
 
       expect(reading.displaySteps, 0, reason: 'the new day starts fresh');
@@ -150,6 +155,132 @@ void main() {
       expect((await session.record(6, day2)).displaySteps, 0,
           reason: "a reset is not yesterday's total carried into today");
       expect(store.daily['2026-08-16'], 500, reason: 'yesterday still holds');
+    });
+  });
+
+  group('steps batched across midnight', () {
+    final lastNight = DateTime(2026, 8, 16, 22, 30);
+    final morning = DateTime(2026, 8, 17, 7, 30);
+
+    test('the batch is credited to the new day, not swallowed by it', () async {
+      await accumulator.record(1000, lastNight);
+      await accumulator.record(1200, lastNight);
+
+      final reading = await accumulator.record(4200, morning);
+
+      expect(reading.displaySteps, 3000,
+          reason: 'the 3000 steps the reading carries are the morning walk');
+      expect(store.daily['2026-08-17'], 3000);
+      expect(store.daily['2026-08-16'], 200, reason: "yesterday's total holds");
+    });
+
+    test('and the day keeps counting on top of the batch', () async {
+      await accumulator.record(1000, lastNight);
+      await accumulator.record(4000, morning);
+
+      expect((await accumulator.record(4500, morning)).displaySteps, 3500);
+    });
+
+    test('the batch survives the service dying overnight', () async {
+      var session = StepAccumulator(store);
+      await session.record(1000, lastNight);
+      await session.record(1200, lastNight);
+
+      // Killed overnight and restarted without a reboot, so the hardware
+      // counter kept climbing and the previous reading has to come back from
+      // storage rather than from memory.
+      session = StepAccumulator(store);
+
+      expect((await session.record(4200, morning)).displaySteps, 3000);
+    });
+
+    test('the batch lands in the hour whose reading delivered it', () async {
+      await accumulator.record(1000, lastNight);
+      final reading = await accumulator.record(4000, morning);
+
+      expect(reading.hourlySteps, 3000);
+      expect(store.hourly['2026-08-17@7'], 3000);
+      expect(store.hourly['2026-08-17@22'], isNull,
+          reason: 'a batch carries no timestamps of its own to spread over');
+    });
+
+    test('a gap too wide to attribute is dropped, not piled onto today',
+        () async {
+      await accumulator.record(1000, DateTime(2026, 8, 14, 9));
+
+      final reading = await accumulator.record(10000, DateTime(2026, 8, 17, 9));
+
+      expect(reading.displaySteps, 0);
+    });
+
+    test('the carry-over limit is a night and a bit, not a day', () {
+      expect(StepAccumulator.maxCarryOverGap, const Duration(hours: 18));
+    });
+
+    test('a gap just inside the limit still carries over', () async {
+      final earlier = DateTime(2026, 8, 16, 12);
+      await accumulator.record(1000, earlier);
+
+      final reading = await accumulator.record(
+        4000,
+        earlier
+            .add(StepAccumulator.maxCarryOverGap)
+            .subtract(const Duration(minutes: 1)),
+      );
+
+      expect(reading.displaySteps, 3000);
+    });
+
+    test('a gap just outside the limit does not', () async {
+      final earlier = DateTime(2026, 8, 16, 12);
+      await accumulator.record(1000, earlier);
+
+      final reading = await accumulator.record(
+        4000,
+        earlier
+            .add(StepAccumulator.maxCarryOverGap)
+            .add(const Duration(minutes: 1)),
+      );
+
+      expect(reading.displaySteps, 0);
+    });
+
+    test('a reading encodes and parses back to the same pair', () {
+      final encoded =
+          LastRawReading(raw: 4200, at: DateTime(2026, 8, 17, 7, 30)).encode();
+      final parsed = LastRawReading.tryParse(encoded)!;
+
+      expect(parsed.raw, 4200);
+      expect(parsed.at, DateTime(2026, 8, 17, 7, 30));
+    });
+
+    test('a reading stored without a time round-trips as untimed', () {
+      // What an upgrade from the two-key build produces once it is rewritten.
+      final parsed =
+          LastRawReading.tryParse(const LastRawReading(raw: 900).encode())!;
+
+      expect(parsed.raw, 900);
+      expect(parsed.at, isNull);
+    });
+
+    test('a malformed stored value is treated as nothing stored', () {
+      // Better than throwing on every reading for the life of the install.
+      for (final value in ['', 'nonsense', '@123', 'abc@123']) {
+        expect(LastRawReading.tryParse(value), isNull, reason: value);
+      }
+    });
+
+    test('a reading with no recorded time is not carried over', () async {
+      store.lastReading = const LastRawReading(raw: 1000, at: null);
+
+      expect((await accumulator.record(4200, morning)).displaySteps, 0);
+    });
+
+    test('a reboot across midnight still starts the new day at zero',
+        () async {
+      await accumulator.record(1000, lastNight);
+      expect((await accumulator.record(40, morning)).displaySteps, 0);
+      expect((await accumulator.record(140, morning)).displaySteps, 100);
     });
   });
 
@@ -223,10 +354,6 @@ void main() {
   });
 
   group('recalibration', () {
-    // Changing the factor rescales the whole day, not just the steps taken
-    // after it. That is the intent — the factor says the sensor has been
-    // over- or under-reporting all along — but it does mean the displayed
-    // total can move without anyone walking, so it is worth pinning.
     test('a new correction factor restates the day retroactively', () async {
       await accumulator.record(1000, day1);
       expect((await accumulator.record(1500, day1)).displaySteps, 500);
@@ -268,8 +395,6 @@ void main() {
       expect(await accumulator.creditManualSteps(-5, day1), isNull);
     });
 
-    // Regression: falling back to zero when no reading has landed yet
-    // overwrote the day's stored total with just the credit.
     test('build on the stored total when no reading has landed yet', () async {
       store.daily['2026-08-16'] = 4000;
 
@@ -282,14 +407,9 @@ void main() {
       await accumulator.record(1500, day1);
       await accumulator.creditManualSteps(200, day1);
 
-      // The baseline is reconstructed from the stored total, which now holds
-      // 500 walked plus 200 credited. Only the walked part came from the
-      // sensor; treating all 700 as sensor steps would double the credit.
       expect((await accumulator.record(3, day1)).displaySteps, 700);
     });
 
-    // Regression: the credit used to mark the day as resolved, which stopped
-    // the next reading from re-baselining and folded yesterday into today.
     test('on a new day do not suppress the next reading rebaselining',
         () async {
       await accumulator.record(1000, day1);
