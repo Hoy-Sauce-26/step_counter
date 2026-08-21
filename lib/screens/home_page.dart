@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../services/metrics.dart';
 import '../services/pedometer_service.dart';
 import '../services/providers.dart';
+import '../widgets/add_steps_dialog.dart';
 import '../widgets/calibration_dialog.dart';
 import '../widgets/charts/weekly_bar_chart.dart';
 import '../widgets/edit_target_dialog.dart';
@@ -188,15 +189,9 @@ class _HomePageState extends ConsumerState<HomePage>
                 currentUnitSystem: unitSystem,
               );
               if (result != null) {
-                ref
-                    .read(heightCmProvider.notifier)
-                    .update(result.heightCm);
-                ref
-                    .read(weightKgProvider.notifier)
-                    .update(result.weightKg);
-                ref
-                    .read(unitSystemProvider.notifier)
-                    .update(result.unitSystem);
+                ref.read(heightCmProvider.notifier).update(result.heightCm);
+                ref.read(weightKgProvider.notifier).update(result.weightKg);
+                ref.read(unitSystemProvider.notifier).update(result.unitSystem);
               }
             },
           ),
@@ -211,9 +206,7 @@ class _HomePageState extends ConsumerState<HomePage>
                 pedometerService,
               );
               if (newFactor != null) {
-                ref
-                    .read(calibrationFactorProvider.notifier)
-                    .update(newFactor);
+                ref.read(calibrationFactorProvider.notifier).update(newFactor);
               }
             },
           ),
@@ -273,6 +266,19 @@ class _StepContent extends ConsumerWidget {
         unit: unitSystem,
       );
 
+  /// Credits steps the sensor never saw. The service broadcasts the new total
+  /// back over `stepUpdate`, so nothing here has to refresh the count.
+  Future<void> _addSteps(BuildContext context, WidgetRef ref) async {
+    final amount = await showAddStepsDialog(context);
+    if (amount == null) return;
+
+    await ref.read(pedometerServiceProvider).addManualSteps(amount);
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Added $amount steps to today')),
+    );
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
@@ -283,7 +289,11 @@ class _StepContent extends ConsumerWidget {
       child: Column(
         children: [
           const SizedBox(height: 8),
-          StepProgressRing(currentSteps: steps, dailyTarget: target),
+          StepProgressRing(
+            currentSteps: steps,
+            dailyTarget: target,
+            onTap: () => _addSteps(context, ref),
+          ),
           const SizedBox(height: 24),
           Row(
             children: [
@@ -327,8 +337,7 @@ class _StepContent extends ConsumerWidget {
             data: (records) => WeeklyBarChart(
               last7Days: records,
               dailyTarget: target,
-              onDaySelected: (date) =>
-                  showHourlyBreakdownDialog(context, date),
+              onDaySelected: (date) => showHourlyBreakdownDialog(context, date),
             ),
             loading: () => const SizedBox(
               height: 240,
@@ -415,7 +424,8 @@ class _BackgroundServiceFailedBanner extends StatelessWidget {
     final theme = Theme.of(context);
     return MaterialBanner(
       backgroundColor: theme.colorScheme.errorContainer,
-      leading: Icon(Icons.warning_amber, color: theme.colorScheme.onErrorContainer),
+      leading:
+          Icon(Icons.warning_amber, color: theme.colorScheme.onErrorContainer),
       content: Text(
         "Step tracking couldn't start — your steps may not be counted "
         "until this is retried.",
