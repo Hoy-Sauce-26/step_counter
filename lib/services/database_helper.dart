@@ -66,7 +66,7 @@ class DatabaseHelper {
         databasePathOverride ?? p.join(await getDatabasesPath(), 'step_counter.db');
     return openDatabase(
       path,
-      version: 4,
+      version: 6,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE daily_steps (
@@ -103,6 +103,12 @@ class DatabaseHelper {
           // v3 already has routes/sessions, just under the sessions
           // table's old name.
           await db.execute('ALTER TABLE walk_sessions RENAME TO route_sessions');
+        }
+        // v5 carried the roameter/pedometer shadow-run tables. That
+        // comparison is finished and roameter is now the only source.
+        if (oldVersion == 5) {
+          await db.execute('DROP TABLE IF EXISTS roameter_daily_steps');
+          await db.execute('DROP TABLE IF EXISTS roameter_hourly_steps');
         }
       },
     );
@@ -268,4 +274,5 @@ class DatabaseHelper {
     await db.delete('route_sessions', where: 'routeId = ?', whereArgs: [routeId]);
     await db.delete('routes', where: 'id = ?', whereArgs: [routeId]);
   }
+
 }

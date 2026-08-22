@@ -43,15 +43,6 @@ final stepSensorAvailableProvider = StreamProvider<bool>((ref) {
   return service.sensorAvailableStream;
 });
 
-/// No UI consumer — kept subscribed because it holds the sensor pipeline
-/// open, which is what makes the step counter deliver per-step instead of in
-/// laggy batches. See `PedometerService._applyForegroundSensing`.
-final walkingStatusProvider = StreamProvider<String>((ref) {
-  final service = ref.watch(pedometerServiceProvider);
-  service.start();
-  return service.walkingStatusStream;
-});
-
 abstract class SettingNotifier<T> extends Notifier<T> {
   /// Shown until [load] returns — reads are synchronous, so there has to be
   /// something to show first.

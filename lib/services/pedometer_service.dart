@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
-import 'package:pedometer/pedometer.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import 'database_helper.dart';
@@ -16,30 +15,24 @@ import 'service_channel.dart' as channel;
 enum StepPermissionStatus { granted, denied, permanentlyDenied }
 
 class PedometerService {
-  StreamSubscription<PedestrianStatus>? _statusSubscription;
   StreamSubscription<dynamic>? _bgStepSubscription;
   StreamSubscription<dynamic>? _bgRawSubscription;
   StreamSubscription<dynamic>? _bgRouteSubscription;
   StreamSubscription<dynamic>? _bgSensorStatusSubscription;
   final _controller = StreamController<int>.broadcast();
   final _sensorAvailableController = StreamController<bool>.broadcast();
-  final _statusController = StreamController<String>.broadcast();
   final _rawCumulativeController = StreamController<int>.broadcast();
   final _routeStepsController = StreamController<int>.broadcast();
   final _dbHelper = DatabaseHelper.instance;
   final _prefsService = PreferencesService();
 
   bool _starting = false;
-  bool _started = false;
-  bool _foregroundSensing = true;
   int? _lastKnownRawSteps;
   bool? _sensorAvailable;
   int? _activeRouteSteps;
   String? _liveStepsDate;
 
   Stream<int> get todayStepsStream => _controller.stream;
-
-  Stream<String> get walkingStatusStream => _statusController.stream;
 
   /// Live active-route step count
   Stream<int> get activeRouteStepsStream => Stream<int>.multi((controller) {
@@ -174,47 +167,9 @@ class PedometerService {
         setSensorAvailable(knownAvailable);
       }
 
-      _started = true;
-      _applyForegroundSensing();
     } finally {
       _starting = false;
     }
-  }
-
-  /// Whether the app is on screen — drives [_applyForegroundSensing].
-  void setForegroundSensing(bool enabled) {
-    if (_foregroundSensing == enabled) return;
-    _foregroundSensing = enabled;
-    _applyForegroundSensing();
-  }
-
-  /// Subscribes to the step detector while on screen, drops it otherwise.
-  ///
-  /// Nothing consumes [walkingStatusStream] directly — this subscription is
-  /// kept because `TYPE_STEP_DETECTOR` at `SENSOR_DELAY_FASTEST` holds the
-  /// sensor pipeline open, which is what makes `TYPE_STEP_COUNTER` deliver
-  /// per-step instead of in laggy batches. Worth the power draw only while
-  /// the screen is on; the background service counts regardless.
-  void _applyForegroundSensing() {
-    if (!_started) return;
-
-    if (!_foregroundSensing) {
-      _statusSubscription?.cancel();
-      _statusSubscription = null;
-      return;
-    }
-    if (_statusSubscription != null) {
-      return;
-    }
-    _statusSubscription = Pedometer.pedestrianStatusStream.listen(
-      (status) {
-        debugPrint('[PedometerService] pedestrian status: ${status.status} '
-            'at ${DateTime.now()}');
-        _statusController.add(status.status);
-      },
-      onError: (Object error) => _statusController.add('unknown'),
-      cancelOnError: false,
-    );
   }
 
   /// Re-seeds the displayed count from storage on resume, so a date rollover
@@ -252,15 +207,11 @@ class PedometerService {
     _bgRouteSubscription = null;
     _bgSensorStatusSubscription?.cancel();
     _bgSensorStatusSubscription = null;
-    _statusSubscription?.cancel();
-    _statusSubscription = null;
-    _started = false;
   }
 
   void dispose() {
     stop();
     _controller.close();
-    _statusController.close();
     _rawCumulativeController.close();
     _routeStepsController.close();
     _sensorAvailableController.close();

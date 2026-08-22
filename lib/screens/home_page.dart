@@ -54,8 +54,6 @@ class _HomePageState extends ConsumerState<HomePage>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      ref.read(pedometerServiceProvider).setForegroundSensing(true);
-
       // Re-sync on resume, so a date rollover while the app was closed
       // doesn't leave yesterday's total on screen until the next step.
       ref.read(pedometerServiceProvider).refreshForCurrentDate();
@@ -68,14 +66,6 @@ class _HomePageState extends ConsumerState<HomePage>
       _ensureBackgroundServiceRunning();
 
       _refreshBatteryPrompt();
-    }
-
-    // Only paused/detached, never inactive: inactive fires for a pulled-down
-    // notification shade and for the app switcher, and tearing the
-    // subscription down and back up for those would cost more than it saves.
-    if (state == AppLifecycleState.paused ||
-        state == AppLifecycleState.detached) {
-      ref.read(pedometerServiceProvider).setForegroundSensing(false);
     }
   }
 
@@ -290,7 +280,6 @@ class _HomePageState extends ConsumerState<HomePage>
     final unitSystem = ref.watch(unitSystemProvider);
     final stepsAsync = ref.watch(todayStepsProvider);
 
-    ref.watch(walkingStatusProvider);
     final sensorAvailable = ref.watch(stepSensorAvailableProvider).value;
 
     return Scaffold(

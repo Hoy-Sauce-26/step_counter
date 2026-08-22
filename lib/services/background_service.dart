@@ -4,7 +4,7 @@ import 'dart:ui';
 import 'package:flutter/foundation.dart'
     show debugPrint, kDebugMode, visibleForTesting;
 import 'package:flutter_background_service/flutter_background_service.dart';
-import 'package:pedometer/pedometer.dart';
+import 'package:roameter/roameter.dart';
 import 'formatting.dart';
 import 'notification_service.dart';
 import 'notification_throttle.dart';
@@ -33,7 +33,7 @@ Future<void> initializeBackgroundService() async {
   );
 }
 
-/// This is the only place in the app that calls `Pedometer.stepCountStream.listen()`
+/// The only place in the app that subscribes to the step sensor.
 @pragma('vm:entry-point')
 void onServiceStart(ServiceInstance service) async {
   // TEMP DIAGNOSTIC — stepUpdate seen doubled once, not reproduced since.
@@ -178,8 +178,18 @@ void onServiceStart(ServiceInstance service) async {
     }
   }
 
-  Pedometer.stepCountStream.listen((event) async {
+  // batchLatency zero: deliver each reading as it happens rather than letting
+  // the sensor hub buffer them, which is what keeps the notification live.
+  // Phase 4 turns this down for the sampler, where nobody is watching.
+  const roameter = Roameter();
+  roameter.stepCounts(batchLatency: Duration.zero).listen((event) async {
+    // The event's own `timestamp` is deliberately not used for bucketing yet.
+    // With zero batching it matches arrival to within milliseconds, except on
+    // the first reading after a restart, which carries the time the count last
+    // changed — possibly yesterday. Attributing by event time is Phase 5.1's
+    // job and needs that case handled; this keeps today's semantics exactly.
     final now = DateTime.now();
+
     final rawChanged = lastKnownRawSteps != event.steps;
     lastKnownRawSteps = event.steps;
     await recordSensorStatus(true);
