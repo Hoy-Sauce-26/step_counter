@@ -1,14 +1,16 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter_background_service/flutter_background_service.dart';
-import 'package:pedometer/pedometer.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:roameter/roameter.dart';
 
 import 'database_helper.dart';
 import 'formatting.dart';
+import 'live_step_counter.dart';
+import 'step_projection.dart';
 import 'preferences_service.dart';
 import 'service_channel.dart' as channel;
+import 'tracking_service.dart';
 
 /// The three permission outcomes the UI has to tell apart. [denied] can be
 /// retried with a system dialog; [permanentlyDenied] can't — Android silently
@@ -16,30 +18,38 @@ import 'service_channel.dart' as channel;
 enum StepPermissionStatus { granted, denied, permanentlyDenied }
 
 class PedometerService {
-  StreamSubscription<PedestrianStatus>? _statusSubscription;
+  PedometerService({
+    Roameter sensor = const Roameter(),
+    StepProjection? projection,
+  })  : _sensor = sensor,
+        _projection = projection ?? StepProjection();
+
+  final Roameter _sensor;
+  final StepProjection _projection;
+
   StreamSubscription<dynamic>? _bgStepSubscription;
   StreamSubscription<dynamic>? _bgRawSubscription;
   StreamSubscription<dynamic>? _bgRouteSubscription;
   StreamSubscription<dynamic>? _bgSensorStatusSubscription;
   final _controller = StreamController<int>.broadcast();
   final _sensorAvailableController = StreamController<bool>.broadcast();
-  final _statusController = StreamController<String>.broadcast();
   final _rawCumulativeController = StreamController<int>.broadcast();
   final _routeStepsController = StreamController<int>.broadcast();
   final _dbHelper = DatabaseHelper.instance;
   final _prefsService = PreferencesService();
 
   bool _starting = false;
-  bool _started = false;
-  bool _foregroundSensing = true;
+  bool _startingLocal = false;
   int? _lastKnownRawSteps;
+
+  /// Set while this isolate is counting for itself — see [startLocalCounting].
+  StreamSubscription<StepCountReading>? _localSubscription;
+  LiveStepCounter? _localCounter;
   bool? _sensorAvailable;
   int? _activeRouteSteps;
   String? _liveStepsDate;
 
   Stream<int> get todayStepsStream => _controller.stream;
-
-  Stream<String> get walkingStatusStream => _statusController.stream;
 
   /// Live active-route step count
   Stream<int> get activeRouteStepsStream => Stream<int>.multi((controller) {
@@ -133,9 +143,10 @@ class PedometerService {
       final existing = await _dbHelper.getStepsForDate(today);
       _controller.add(existing?.stepCount ?? 0);
 
-      final service = FlutterBackgroundService();
+      final service = TrackingService();
 
-      // TEMP DIAGNOSTIC — see BackgroundService.onServiceStart.
+      // One line per subscription actually created; two would mean the app
+      // is listening twice and double-counting every report.
       if (kDebugMode) {
         debugPrint('[PedometerService] SUBSCRIBING to stepUpdate');
       }
@@ -174,47 +185,98 @@ class PedometerService {
         setSensorAvailable(knownAvailable);
       }
 
-      _started = true;
-      _applyForegroundSensing();
     } finally {
       _starting = false;
     }
   }
 
-  /// Whether the app is on screen — drives [_applyForegroundSensing].
-  void setForegroundSensing(bool enabled) {
-    if (_foregroundSensing == enabled) return;
-    _foregroundSensing = enabled;
-    _applyForegroundSensing();
+  /// Counts from the sensor in this isolate, because no service is doing it.
+  ///
+  /// The tracking service is the usual source of the displayed total, but it
+  /// only runs when the ongoing notification is on. With it off the count
+  /// would otherwise sit still while somebody watches it, which is the one
+  /// moment it most obviously must not.
+  ///
+  /// Only while the app is on screen. The step counter reports its current
+  /// value the instant a listener registers, so subscribing here both catches
+  /// the display up and keeps it live, and dropping the subscription on the
+  /// way out costs nothing — the counter kept running, and the next reading
+  /// closes whatever gap opened.
+  Future<void> startLocalCounting() async {
+    if (_localSubscription != null || _startingLocal) return;
+    _startingLocal = true;
+    try {
+      if (!await hasPermission()) return;
+
+      final correctionFactor = await _prefsService.getCorrectionFactor();
+      final counter = LiveStepCounter(
+        _projection,
+        correctionFactor: () => correctionFactor,
+      );
+      _localCounter = counter;
+
+      _localSubscription = _sensor
+          .stepCounts(batchLatency: Duration.zero)
+          .listen((reading) =>
+              recordLocalReading(reading.steps, null, reading.timestamp),
+              onError: (Object error) {
+        debugPrint('[PedometerService] local counting failed: $error');
+      });
+    } finally {
+      _startingLocal = false;
+    }
   }
 
-  /// Subscribes to the step detector while on screen, drops it otherwise.
-  ///
-  /// Nothing consumes [walkingStatusStream] directly — this subscription is
-  /// kept because `TYPE_STEP_DETECTOR` at `SENSOR_DELAY_FASTEST` holds the
-  /// sensor pipeline open, which is what makes `TYPE_STEP_COUNTER` deliver
-  /// per-step instead of in laggy batches. Worth the power draw only while
-  /// the screen is on; the background service counts regardless.
-  void _applyForegroundSensing() {
-    if (!_started) return;
-
-    if (!_foregroundSensing) {
-      _statusSubscription?.cancel();
-      _statusSubscription = null;
-      return;
-    }
-    if (_statusSubscription != null) {
-      return;
-    }
-    _statusSubscription = Pedometer.pedestrianStatusStream.listen(
-      (status) {
-        debugPrint('[PedometerService] pedestrian status: ${status.status} '
-            'at ${DateTime.now()}');
-        _statusController.add(status.status);
-      },
-      onError: (Object error) => _statusController.add('unknown'),
-      cancelOnError: false,
+  /// Arms local counting without touching a sensor or a permission.
+  @visibleForTesting
+  Future<void> startLocalCountingForTest() async {
+    _localCounter = LiveStepCounter(
+      _projection,
+      correctionFactor: () => 1.0,
     );
+  }
+
+  /// Folds one locally-read reading in and pushes the result to the display.
+  ///
+  /// Separate from the subscription so it can be exercised without a sensor
+  /// or a permission to ask for. The bug it guards against was the display
+  /// never being written to at all while the service was off.
+  @visibleForTesting
+  Future<void> recordLocalReading(
+    int rawSteps, [
+    DateTime? now,
+    DateTime? observedAt,
+  ]) async {
+    final counter = _localCounter;
+    if (counter == null) return;
+
+    _lastKnownRawSteps = rawSteps;
+    _rawCumulativeController.add(rawSteps);
+
+    final live = await counter.record(
+      rawSteps,
+      now ?? DateTime.now(),
+      observedAt: observedAt,
+    );
+    _liveStepsDate = live.date;
+    _controller.add(live.displaySteps);
+  }
+
+  /// Stops counting locally, committing whatever hasn't been journalled.
+  Future<void> stopLocalCounting() async {
+    final subscription = _localSubscription;
+    final counter = _localCounter;
+    _localSubscription = null;
+    _localCounter = null;
+    if (subscription == null) return;
+
+    await subscription.cancel();
+    final raw = _lastKnownRawSteps;
+    // Otherwise the steps since the last journal write wait on a timer that
+    // has just been cancelled.
+    if (counter != null && raw != null) {
+      await counter.flush(raw, DateTime.now());
+    }
   }
 
   /// Re-seeds the displayed count from storage on resume, so a date rollover
@@ -230,17 +292,17 @@ class PedometerService {
     await _prefsService.setCorrectionFactor(factor);
     // The background service caches its own copy — without this it
     // wouldn't pick up a recalibration until the next day or a restart.
-    channel.setCorrectionFactor.send(FlutterBackgroundService(), factor);
+    channel.setCorrectionFactor.send(TrackingService(), factor);
   }
 
   Future<void> addManualSteps(int amount) async {
-    channel.addManualSteps.send(FlutterBackgroundService(), amount);
+    channel.addManualSteps.send(TrackingService(), amount);
   }
 
   Future<void> setDailyTarget(int target) async {
     await _prefsService.setDailyTarget(target);
     // Same reason as setCorrectionFactor
-    channel.setDailyTarget.send(FlutterBackgroundService(), target);
+    channel.setDailyTarget.send(TrackingService(), target);
   }
 
   void stop() {
@@ -252,15 +314,14 @@ class PedometerService {
     _bgRouteSubscription = null;
     _bgSensorStatusSubscription?.cancel();
     _bgSensorStatusSubscription = null;
-    _statusSubscription?.cancel();
-    _statusSubscription = null;
-    _started = false;
+    _localSubscription?.cancel();
+    _localSubscription = null;
+    _localCounter = null;
   }
 
   void dispose() {
     stop();
     _controller.close();
-    _statusController.close();
     _rawCumulativeController.close();
     _routeStepsController.close();
     _sensorAvailableController.close();

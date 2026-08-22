@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'metrics.dart';
@@ -19,6 +20,31 @@ class PreferencesService {
   // a miscounted test, not a walker, so it is clamped rather than trusted.
   static const double minStepsPerMinute = 60;
   static const double maxStepsPerMinute = 150;
+
+  /// Removes keys left behind by storage this version no longer uses.
+  ///
+  /// Baselines and last-raw readings were how totals were derived before the
+  /// journal; nothing reads them now. Preferences load whole on first access,
+  /// so orphans are paid for on every launch until they are cleared.
+  Future<void> removeSupersededKeys() async {
+    final prefs = await SharedPreferences.getInstance();
+    const dead = {
+      'lastRawReading',
+      'lastRawSteps',
+      'lastRawStepsAt',
+      'roameterLastRawReading',
+    };
+    final stale = prefs.getKeys().where((key) {
+      final name = key.startsWith('flutter.') ? key.substring(8) : key;
+      return dead.contains(name) ||
+          name.startsWith('baseline_') ||
+          name.startsWith('roameter_baseline_');
+    }).toList();
+
+    for (final key in stale) {
+      await prefs.remove(key.startsWith('flutter.') ? key.substring(8) : key);
+    }
+  }
 
   /// Drops this isolate's cached snapshot of the preference file, so a
   /// value the other isolate just wrote becomes visible here.
@@ -68,52 +94,20 @@ class PreferencesService {
     );
   }
 
-  static const _lastRawReadingKey = 'lastRawReading';
-  static const _legacyLastRawStepsKey = 'lastRawSteps';
-  static const _legacyLastRawStepsAtKey = 'lastRawStepsAt';
+  // Whether the always-on foreground service runs. Off means no ongoing
+  // notification and no live updates; steps are still counted, because the
+  // hardware counter never stopped and the journal picks the gap up. On by
+  // default — a live count is the thing the app is for.
+  static const _foregroundTrackingKey = 'foregroundTrackingEnabled';
 
-  /// The last raw reading and when it arrived, as one value.
-  Future<LastRawReading?> getLastRawReading() async {
+  Future<bool> getForegroundTrackingEnabled() async {
     final prefs = await SharedPreferences.getInstance();
-    final combined = prefs.getString(_lastRawReadingKey);
-    if (combined != null) return LastRawReading.tryParse(combined);
-
-    // An install that predates the combined key. Without this the first
-    // reading after the update would have nothing to compare against, and a
-    // reboot in that window would go undetected.
-    // The next write supersedes these, and they are never read again.
-    final raw = prefs.getInt(_legacyLastRawStepsKey);
-    if (raw == null) return null;
-    final millis = prefs.getInt(_legacyLastRawStepsAtKey);
-    return LastRawReading(
-      raw: raw,
-      at: millis == null ? null : DateTime.fromMillisecondsSinceEpoch(millis),
-    );
+    return prefs.getBool(_foregroundTrackingKey) ?? true;
   }
 
-  Future<void> setLastRawReading(LastRawReading reading) async {
+  Future<void> setForegroundTrackingEnabled(bool enabled) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_lastRawReadingKey, reading.encode());
-  }
-
-  /// The raw-sensor reading that counts as zero steps for [date]. Only the
-  /// current day's is ever needed, so writing one drops every other day's.
-  Future<int?> getStepBaseline(String date) async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getInt('baseline_$date');
-  }
-
-  Future<void> setStepBaseline(String date, int baseline) async {
-    final prefs = await SharedPreferences.getInstance();
-    final key = 'baseline_$date';
-    await prefs.setInt(key, baseline);
-    final stale = prefs
-        .getKeys()
-        .where((k) => k.startsWith('baseline_') && k != key)
-        .toList();
-    for (final k in stale) {
-      await prefs.remove(k);
-    }
+    await prefs.setBool(_foregroundTrackingKey, enabled);
   }
 
   // Written by the background isolate on a timer, not per-reading — a
@@ -258,8 +252,9 @@ class PreferencesService {
     await prefs.remove(_activeRouteKey);
   }
 
-  /// Steps manually credited to [date] (e.g. a route logged without live
-  /// tracking), on top of whatever the sensor recorded. Defaults to 0.
+  /// A manual credit left over from before credits became per-date database
+  /// rows. Read once at start-up by [StepProjection] and then cleared; new
+  /// credits never come here.
   Future<int> getManualSteps(String date) async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getInt('manualSteps_$date') ?? 0;
@@ -267,6 +262,15 @@ class PreferencesService {
 
   /// Only the current day's credit is ever read, so writing one drops every
   /// other day's — same reasoning as [setStepBaseline].
+  /// Clears a legacy credit once it has been moved into the database.
+  Future<void> clearManualSteps(String date) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('manualSteps_$date');
+  }
+
+  /// Legacy: nothing in the app writes credits here any more. Kept so the
+  /// migration in `StepProjection` has something to exercise in tests.
+  @visibleForTesting
   Future<void> setManualSteps(String date, int steps) async {
     final prefs = await SharedPreferences.getInstance();
     final key = 'manualSteps_$date';
@@ -278,27 +282,5 @@ class PreferencesService {
     for (final k in stale) {
       await prefs.remove(k);
     }
-  }
-}
-
-/// The last raw sensor reading, with the moment it arrived.
-class LastRawReading {
-  const LastRawReading({required this.raw, this.at});
-
-  final int raw;
-  final DateTime? at;
-
-  String encode() => '$raw@${at?.millisecondsSinceEpoch ?? ''}';
-
-  static LastRawReading? tryParse(String value) {
-    final separator = value.indexOf('@');
-    if (separator < 0) return null;
-    final raw = int.tryParse(value.substring(0, separator));
-    if (raw == null) return null;
-    final millis = int.tryParse(value.substring(separator + 1));
-    return LastRawReading(
-      raw: raw,
-      at: millis == null ? null : DateTime.fromMillisecondsSinceEpoch(millis),
-    );
   }
 }

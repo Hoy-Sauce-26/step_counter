@@ -6,6 +6,7 @@ import '../models/daily_steps.dart';
 import 'formatting.dart';
 import '../models/hourly_steps.dart';
 import '../models/saved_route.dart';
+import '../models/step_journal_entry.dart';
 
 /// Local persistence for daily/hourly step records and saved routes, via
 /// sqflite.
@@ -17,6 +18,8 @@ import '../models/saved_route.dart';
 ///   routes(id INTEGER PRIMARY KEY, name TEXT NOT NULL, createdAt TEXT)
 ///   route_sessions(id INTEGER PRIMARY KEY, routeId INTEGER, date TEXT,
 ///                  steps INTEGER, durationSeconds INTEGER)
+///   step_journal(recordedAt INTEGER PRIMARY KEY, rawSteps INTEGER NOT NULL)
+///   manual_steps(date TEXT PRIMARY KEY, stepCount INTEGER NOT NULL)
 class DatabaseHelper {
   DatabaseHelper._internal();
   static final DatabaseHelper instance = DatabaseHelper._internal();
@@ -66,7 +69,7 @@ class DatabaseHelper {
         databasePathOverride ?? p.join(await getDatabasesPath(), 'step_counter.db');
     return openDatabase(
       path,
-      version: 4,
+      version: 7,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE daily_steps (
@@ -83,6 +86,7 @@ class DatabaseHelper {
           )
         ''');
         await _createRouteTables(db);
+        await _createJournalTables(db);
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         // v1 installs only have daily_steps — add hourly_steps without
@@ -97,6 +101,10 @@ class DatabaseHelper {
             )
           ''');
         }
+        // else-if, not a second if: _createRouteTables already builds
+        // route_sessions under its current name, so a v1 or v2 install has
+        // nothing to rename. Only a v3 install, which has the table under the
+        // old name, needs the rename below.
         if (oldVersion < 3) {
           await _createRouteTables(db);
         } else if (oldVersion < 4) {
@@ -104,8 +112,37 @@ class DatabaseHelper {
           // table's old name.
           await db.execute('ALTER TABLE walk_sessions RENAME TO route_sessions');
         }
+        // v5 carried the roameter/pedometer shadow-run tables. That
+        // comparison is finished and roameter is now the only source.
+        if (oldVersion == 5) {
+          await db.execute('DROP TABLE IF EXISTS roameter_daily_steps');
+          await db.execute('DROP TABLE IF EXISTS roameter_hourly_steps');
+        }
+        if (oldVersion < 7) {
+          await _createJournalTables(db);
+        }
       },
     );
+  }
+
+  Future<void> _createJournalTables(Database db) async {
+    // recordedAt is the primary key: two readings at the same millisecond are
+    // the same reading, and the fold differences adjacent rows.
+    await db.execute('''
+      CREATE TABLE step_journal (
+        recordedAt INTEGER PRIMARY KEY,
+        rawSteps INTEGER NOT NULL
+      )
+    ''');
+    // Manual credits used to live in preferences, pruned to the current day.
+    // Re-deriving a past day from the journal needs its credits back, so they
+    // are durable and per-date here.
+    await db.execute('''
+      CREATE TABLE manual_steps (
+        date TEXT PRIMARY KEY,
+        stepCount INTEGER NOT NULL
+      )
+    ''');
   }
 
   Future<void> _createRouteTables(Database db) async {
@@ -267,5 +304,103 @@ class DatabaseHelper {
     final db = await database;
     await db.delete('route_sessions', where: 'routeId = ?', whereArgs: [routeId]);
     await db.delete('routes', where: 'id = ?', whereArgs: [routeId]);
+  }
+
+  // ---------------------------------------------------------------------
+  // Journal
+  // ---------------------------------------------------------------------
+
+  /// Records one counter reading. Replaces an entry at the same instant
+  /// rather than failing — the sampler and the service can both fire at once.
+  Future<void> appendJournalEntry(StepJournalEntry entry) async {
+    final db = await database;
+    await db.insert(
+      'step_journal',
+      entry.toMap(),
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  /// Journalled readings from [since] onwards, oldest first.
+  ///
+  /// One entry *before* [since] comes along when there is one: the fold works
+  /// on differences, so the reading that opens the first interval has to be
+  /// present or that interval's steps are lost.
+  Future<List<StepJournalEntry>> getJournalEntriesSince(DateTime since) async {
+    final db = await database;
+    final cutoff = since.millisecondsSinceEpoch;
+
+    final preceding = await db.query(
+      'step_journal',
+      where: 'recordedAt < ?',
+      whereArgs: [cutoff],
+      orderBy: 'recordedAt DESC',
+      limit: 1,
+    );
+    final rows = await db.query(
+      'step_journal',
+      where: 'recordedAt >= ?',
+      whereArgs: [cutoff],
+      orderBy: 'recordedAt ASC',
+    );
+
+    return [...preceding, ...rows].map(StepJournalEntry.fromMap).toList();
+  }
+
+  /// Drops journalled readings older than [before]. The totals they were
+  /// folded into are already stored; only the raw readings go.
+  Future<void> pruneJournal(DateTime before) async {
+    final db = await database;
+    await db.delete(
+      'step_journal',
+      where: 'recordedAt < ?',
+      whereArgs: [before.millisecondsSinceEpoch],
+    );
+  }
+
+  /// The most recent journalled reading, or null if the journal is empty.
+  Future<StepJournalEntry?> getLatestJournalEntry() async {
+    final db = await database;
+    final rows = await db.query(
+      'step_journal',
+      orderBy: 'recordedAt DESC',
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    return StepJournalEntry.fromMap(rows.first);
+  }
+
+  // ---------------------------------------------------------------------
+  // Manual credits
+  // ---------------------------------------------------------------------
+
+  Future<int> getManualSteps(String date) async {
+    final db = await database;
+    final rows = await db.query(
+      'manual_steps',
+      where: 'date = ?',
+      whereArgs: [date],
+      limit: 1,
+    );
+    if (rows.isEmpty) return 0;
+    return rows.first['stepCount'] as int;
+  }
+
+  Future<void> setManualSteps(String date, int steps) async {
+    final db = await database;
+    await db.insert(
+      'manual_steps',
+      {'date': date, 'stepCount': steps},
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  /// Every date carrying a manual credit, for re-deriving stored totals.
+  Future<Map<String, int>> getAllManualSteps() async {
+    final db = await database;
+    final rows = await db.query('manual_steps');
+    return {
+      for (final row in rows) row['date'] as String: row['stepCount'] as int,
+    };
   }
 }

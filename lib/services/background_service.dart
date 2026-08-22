@@ -1,85 +1,75 @@
 import 'dart:async';
 import 'dart:ui';
 
+import 'package:flutter/widgets.dart';
+
 import 'package:flutter/foundation.dart'
     show debugPrint, kDebugMode, visibleForTesting;
-import 'package:flutter_background_service/flutter_background_service.dart';
-import 'package:pedometer/pedometer.dart';
+import 'package:roameter/roameter.dart';
 import 'formatting.dart';
 import 'notification_service.dart';
 import 'notification_throttle.dart';
+import 'live_step_counter.dart';
 import 'preferences_service.dart';
 import 'service_channel.dart' as channel;
-import 'step_accumulator.dart';
+import 'tracking_service.dart';
+import 'step_projection.dart';
 
+/// Starts the tracking service, registering [onServiceStart] as what it runs.
+/// Idempotent — starting a running service is a no-op on the platform side.
 Future<void> initializeBackgroundService() async {
-  final service = FlutterBackgroundService();
-
-  await service.configure(
-    androidConfiguration: AndroidConfiguration(
-      onStart: onServiceStart,
-      autoStart: false,
-      isForegroundMode: true,
-      autoStartOnBoot: true,
-      // Can't a dataSync foreground service from BOOT_COMPLETED
-      foregroundServiceTypes: [AndroidForegroundType.health],
-      notificationChannelId: NotificationService.channelId,
-      initialNotificationTitle: 'Roamfree',
-      initialNotificationContent: 'Starting…',
-      foregroundServiceNotificationId: NotificationService.notificationId,
-    ),
-    // No iOS equivalent for this feature — see prior discussion.
-    iosConfiguration: IosConfiguration(),
-  );
+  await TrackingService().start(onServiceStart);
 }
 
-/// This is the only place in the app that calls `Pedometer.stepCountStream.listen()`
+/// The only place in the app that subscribes to the step sensor.
 @pragma('vm:entry-point')
-void onServiceStart(ServiceInstance service) async {
-  // TEMP DIAGNOSTIC — stepUpdate seen doubled once, not reproduced since.
-  // Distinct tags per isolate would confirm two service starts.
+void onServiceStart() async {
+  // This isolate is entered directly from Kotlin, so nothing has set up the
+  // binding the way a normal app launch would. Every platform channel below —
+  // notifications, preferences, sqflite, the sensor — needs it first.
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // Traces service lifecycle: two tags in one process means two isolates,
+  // which is what a duplicate start looks like from Dart.
   final isolateTag = DateTime.now().microsecondsSinceEpoch.toRadixString(36);
   if (kDebugMode) {
     debugPrint('[BackgroundService] onServiceStart ENTER tag=$isolateTag');
   }
 
   DartPluginRegistrant.ensureInitialized();
+  final service = TrackingServiceInstance();
   await NotificationService.init();
 
   final prefsService = PreferencesService();
 
-  // Buffered rather than written straight through:
-  final stepStore = ThrottledStepStore(PersistentStepStore());
-
-  // Same idea for the notification: rewriting it per step is wasted work.
+  // Rewriting the notification per step is wasted work.
   final notifications = NotificationThrottle();
 
-  if (service is AndroidServiceInstance) {
-    service.on('setAsForeground').listen((event) {
-      service.setAsForegroundService();
-    });
-    service.on('setAsBackground').listen((event) {
-      service.setAsBackgroundService();
-    });
-  }
-  service.on('stopService').listen((event) async {
-    // Commit before going away: neither flush timer gets another chance.
-    await stepStore.flush();
-    await notifications.flush();
-    service.stopSelf();
-  });
+  final projection = StepProjection();
+  // Anything left in preferences from before credits became per-date rows.
+  await projection.migrateManualStepsFromPreferences();
 
-  // All day/hour/manual bookkeeping lives here. This isolate keeps no copy of
-  // it, so there is nothing to drift out of sync.
-  final accumulator = StepAccumulator(
-    stepStore,
-    correctionFactor: await prefsService.getCorrectionFactor(),
-  );
-
-  // A snapshot, not a live read: see StepAccumulator.correctionFactor.
+  // A snapshot, not a live read — recalibration arrives over the channel.
+  double correctionFactor = await prefsService.getCorrectionFactor();
   int dailyTarget = await prefsService.getDailyTarget();
 
+  final counter = LiveStepCounter(
+    projection,
+    correctionFactor: () => correctionFactor,
+  );
+
   int? lastKnownRawSteps;
+  var journalSeeded = false;
+
+  // No foreground/background toggle: this service is only ever foreground.
+  service.on('stopService').listen((event) async {
+    // Commit before going away: neither the journal nor the notification
+    // gets another chance.
+    final raw = lastKnownRawSteps;
+    if (raw != null) await counter.flush(raw, DateTime.now());
+    await notifications.flush();
+    await service.stopSelf();
+  });
 
   Map<String, Object?>? activeRoute;
 
@@ -98,7 +88,7 @@ void onServiceStart(ServiceInstance service) async {
 
   // The only way a recalibration reaches this isolate.
   channel.setCorrectionFactor.handle(service, (factor) {
-    accumulator.correctionFactor = factor;
+    correctionFactor = factor;
   });
 
   // Same deal for the target
@@ -130,7 +120,7 @@ void onServiceStart(ServiceInstance service) async {
     activeRoute = null;
     await prefsService.clearActiveRoute();
     // Revert the notification without waiting for the next step event.
-    final steps = accumulator.lastDisplaySteps ?? 0;
+    final steps = counter.lastDisplaySteps ?? 0;
     notifications.run(() => NotificationService.updateStepNotification(
           steps: steps,
           target: dailyTarget,
@@ -139,8 +129,10 @@ void onServiceStart(ServiceInstance service) async {
 
   channel.addManualSteps.handle(service, (amount) async {
     final creditedAt = DateTime.now();
-    final newTotal = await accumulator.creditManualSteps(amount, creditedAt);
-    if (newTotal == null) return;
+    final newTotal = await projection.creditManualSteps(amount, creditedAt);
+    // The credit changed the day's derived total without any reading having
+    // arrived, so the live counter has to pick it up.
+    await counter.refresh(creditedAt);
 
     // Push an update rather than waiting for the next real reading.
     if (activeRoute == null) {
@@ -178,13 +170,32 @@ void onServiceStart(ServiceInstance service) async {
     }
   }
 
-  Pedometer.stepCountStream.listen((event) async {
+  // batchLatency zero: deliver each reading as it happens rather than letting
+  // the sensor hub buffer them, which is what keeps the notification live.
+  // Phase 4 turns this down for the sampler, where nobody is watching.
+  const roameter = Roameter();
+  roameter.stepCounts(batchLatency: Duration.zero).listen((event) async {
     final now = DateTime.now();
+
     final rawChanged = lastKnownRawSteps != event.steps;
     lastKnownRawSteps = event.steps;
     await recordSensorStatus(true);
 
-    final reading = await accumulator.record(event.steps, now);
+    // Before the first record(), so the fold has the day's opening reading.
+    if (!journalSeeded) {
+      journalSeeded = true;
+      await projection.backfillFromStoredTotal(event.steps, now);
+    }
+
+    // The event's own time, not arrival: a reading buffered through a device
+    // sleep stands for the moment the counter reached it, which is when the
+    // walking happened. StepProjection refuses anything out of order, so a
+    // stale timestamp can only file just after the last reading, never before.
+    final reading = await counter.record(
+      event.steps,
+      now,
+      observedAt: event.timestamp,
+    );
     final displaySteps = reading.displaySteps;
 
     // Steps always count toward the daily total above regardless of an
@@ -199,7 +210,7 @@ void onServiceStart(ServiceInstance service) async {
         stepsBefore: route['stepsBefore'] as int? ?? 0,
         bankedSteps: route['steps'] as int?,
         lastRaw: route['lastRaw'] as int?,
-        correctionFactor: accumulator.correctionFactor,
+        correctionFactor: correctionFactor,
       );
       final routeSteps = progress.steps;
 
@@ -238,12 +249,6 @@ void onServiceStart(ServiceInstance service) async {
             steps: displaySteps,
             target: dailyTarget,
           ));
-    }
-
-    // TEMP DIAGNOSTIC — see onServiceStart.
-    if (kDebugMode) {
-      debugPrint('[BackgroundService] send stepUpdate=$displaySteps '
-          'tag=$isolateTag');
     }
 
     // The date rides along so the app can tell a live figure from a stored

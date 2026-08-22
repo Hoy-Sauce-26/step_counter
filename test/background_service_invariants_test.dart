@@ -14,7 +14,7 @@ const _mirroredSettings = <String, String>{
 
 /// Everything above this line runs once when the isolate spins up; everything
 /// below it runs per sensor reading.
-const _startupBoundary = 'Pedometer.stepCountStream.listen';
+const _startupBoundary = 'roameter.stepCounts(';
 
 /// Source lines with `//` comments stripped, so a comment that names an
 /// accessor (`// don't call getDailyTarget() here`) can't trip the check.

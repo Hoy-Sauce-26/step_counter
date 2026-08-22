@@ -1,4 +1,3 @@
-import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/daily_steps.dart';
@@ -9,7 +8,10 @@ import 'formatting.dart';
 import 'metrics.dart';
 import 'pedometer_service.dart';
 import 'system_settings.dart';
+import 'background_service.dart';
 import 'preferences_service.dart';
+import 'step_sync.dart';
+import 'tracking_service.dart';
 import 'service_channel.dart' as channel;
 
 final pedometerServiceProvider = Provider<PedometerService>((ref) {
@@ -30,6 +32,48 @@ final systemSettingsProvider = Provider<SystemSettings>((ref) {
   return const SystemSettings();
 });
 
+final stepSyncProvider = Provider<StepSync>((ref) => StepSync());
+
+/// Whether the ongoing notification — and the service behind it — is on.
+final foregroundTrackingProvider =
+    NotifierProvider<ForegroundTrackingNotifier, bool>(
+  ForegroundTrackingNotifier.new,
+);
+
+class ForegroundTrackingNotifier extends SettingNotifier<bool> {
+  @override
+  bool get fallback => true;
+
+  @override
+  Future<bool> load(PreferencesService prefs) =>
+      prefs.getForegroundTrackingEnabled();
+
+  /// Acts on the setting rather than only storing it, so the notification
+  /// appears or disappears as the switch moves.
+  @override
+  Future<void> save(bool value) async {
+    await prefs.setForegroundTrackingEnabled(value);
+
+    final service = TrackingService();
+    final pedometer = ref.read(pedometerServiceProvider);
+
+    if (value) {
+      // The service takes over, so this isolate stops counting for itself.
+      await pedometer.stopLocalCounting();
+      if (!await service.isRunning()) await service.start(onServiceStart);
+      return;
+    }
+
+    if (await service.isRunning()) await service.stop();
+    // One reading on the way out, so steps taken while the service was
+    // watching are journalled before it goes away.
+    await ref.read(stepSyncProvider).sample();
+    // The app is on screen — it was just tapped — so pick the count up here
+    // rather than leaving the number frozen until the next resume.
+    await pedometer.startLocalCounting();
+  }
+}
+
 /// Live "steps taken today" stream, sourced from the pedometer service.
 final todayStepsProvider = StreamProvider<int>((ref) {
   final service = ref.watch(pedometerServiceProvider);
@@ -41,15 +85,6 @@ final stepSensorAvailableProvider = StreamProvider<bool>((ref) {
   final service = ref.watch(pedometerServiceProvider);
   service.start();
   return service.sensorAvailableStream;
-});
-
-/// No UI consumer — kept subscribed because it holds the sensor pipeline
-/// open, which is what makes the step counter deliver per-step instead of in
-/// laggy batches. See `PedometerService._applyForegroundSensing`.
-final walkingStatusProvider = StreamProvider<String>((ref) {
-  final service = ref.watch(pedometerServiceProvider);
-  service.start();
-  return service.walkingStatusStream;
 });
 
 abstract class SettingNotifier<T> extends Notifier<T> {
@@ -272,7 +307,7 @@ class ActiveRouteNotifier extends Notifier<ActiveRoute?> {
       startTime: startTime,
     );
     channel.startRoute.send(
-      FlutterBackgroundService(),
+      TrackingService(),
       channel.StartRoute(routeId: routeId, routeName: routeName),
     );
   }
@@ -283,7 +318,7 @@ class ActiveRouteNotifier extends Notifier<ActiveRoute?> {
     // Cleared from both sides, unlike the write above. Clearing is
     // idempotent and can only end a route.
     await ref.read(preferencesServiceProvider).clearActiveRoute();
-    channel.stopRoute.send(FlutterBackgroundService());
+    channel.stopRoute.send(TrackingService());
   }
 }
 
