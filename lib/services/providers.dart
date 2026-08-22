@@ -1,4 +1,3 @@
-import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/daily_steps.dart';
@@ -11,6 +10,7 @@ import 'pedometer_service.dart';
 import 'system_settings.dart';
 import 'preferences_service.dart';
 import 'service_channel.dart' as channel;
+import 'tracking_service.dart';
 
 final pedometerServiceProvider = Provider<PedometerService>((ref) {
   final service = PedometerService();
@@ -263,7 +263,7 @@ class ActiveRouteNotifier extends Notifier<ActiveRoute?> {
       startTime: startTime,
     );
     channel.startRoute.send(
-      FlutterBackgroundService(),
+      TrackingService(),
       channel.StartRoute(routeId: routeId, routeName: routeName),
     );
   }
@@ -274,7 +274,7 @@ class ActiveRouteNotifier extends Notifier<ActiveRoute?> {
     // Cleared from both sides, unlike the write above. Clearing is
     // idempotent and can only end a route.
     await ref.read(preferencesServiceProvider).clearActiveRoute();
-    channel.stopRoute.send(FlutterBackgroundService());
+    channel.stopRoute.send(TrackingService());
   }
 }
 

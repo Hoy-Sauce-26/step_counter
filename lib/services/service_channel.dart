@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter_background_service/flutter_background_service.dart';
+import 'tracking_service.dart';
 
 /// Every message crossing the isolate boundary, defined once.
 ///
@@ -17,12 +17,12 @@ class ServiceCommand<T> {
   final Map<String, dynamic> Function(T value) _encode;
   final T? Function(Map<String, dynamic> payload) _decode;
 
-  void send(FlutterBackgroundService service, T value) =>
+  void send(TrackingService service, T value) =>
       service.invoke(name, _encode(value));
 
   /// Registers [onCommand] in the service isolate.
   StreamSubscription<Map<String, dynamic>?> handle(
-    ServiceInstance service,
+    TrackingServiceInstance service,
     void Function(T value) onCommand,
   ) {
     return service.on(name).listen((payload) {
@@ -39,10 +39,10 @@ class ServiceSignal {
 
   final String name;
 
-  void send(FlutterBackgroundService service) => service.invoke(name);
+  void send(TrackingService service) => service.invoke(name);
 
   StreamSubscription<Map<String, dynamic>?> handle(
-    ServiceInstance service,
+    TrackingServiceInstance service,
     void Function() onSignal,
   ) {
     return service.on(name).listen((_) => onSignal());
@@ -57,11 +57,11 @@ class ServiceReport<T> {
   final Map<String, dynamic> Function(T value) _encode;
   final T? Function(Map<String, dynamic> payload) _decode;
 
-  void send(ServiceInstance service, T value) =>
+  void send(TrackingServiceInstance service, T value) =>
       service.invoke(name, _encode(value));
 
   StreamSubscription<Map<String, dynamic>?> listen(
-    FlutterBackgroundService service,
+    TrackingService service,
     void Function(T value) onReport,
   ) {
     return service.on(name).listen((payload) {

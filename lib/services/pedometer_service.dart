@@ -1,13 +1,13 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import 'database_helper.dart';
 import 'formatting.dart';
 import 'preferences_service.dart';
 import 'service_channel.dart' as channel;
+import 'tracking_service.dart';
 
 /// The three permission outcomes the UI has to tell apart. [denied] can be
 /// retried with a system dialog; [permanentlyDenied] can't — Android silently
@@ -126,7 +126,7 @@ class PedometerService {
       final existing = await _dbHelper.getStepsForDate(today);
       _controller.add(existing?.stepCount ?? 0);
 
-      final service = FlutterBackgroundService();
+      final service = TrackingService();
 
       // TEMP DIAGNOSTIC — see BackgroundService.onServiceStart.
       if (kDebugMode) {
@@ -185,17 +185,17 @@ class PedometerService {
     await _prefsService.setCorrectionFactor(factor);
     // The background service caches its own copy — without this it
     // wouldn't pick up a recalibration until the next day or a restart.
-    channel.setCorrectionFactor.send(FlutterBackgroundService(), factor);
+    channel.setCorrectionFactor.send(TrackingService(), factor);
   }
 
   Future<void> addManualSteps(int amount) async {
-    channel.addManualSteps.send(FlutterBackgroundService(), amount);
+    channel.addManualSteps.send(TrackingService(), amount);
   }
 
   Future<void> setDailyTarget(int target) async {
     await _prefsService.setDailyTarget(target);
     // Same reason as setCorrectionFactor
-    channel.setDailyTarget.send(FlutterBackgroundService(), target);
+    channel.setDailyTarget.send(TrackingService(), target);
   }
 
   void stop() {

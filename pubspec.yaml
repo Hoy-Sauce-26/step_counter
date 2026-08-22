@@ -11,7 +11,6 @@ dependencies:
     sdk: flutter
   cupertino_icons: ^1.0.6
 
-  # Step sensing
   # Permissions
   permission_handler: ^12.0.3
 
@@ -27,11 +26,12 @@ dependencies:
   flutter_riverpod: ^3.4.2
 
   intl: ^0.20.3
-  # Own plugin: batching, real event timestamps, one-shot reads.
+  flutter_local_notifications: ^22.3.0
+
+  # Step sensing. Our own: sensor batching, real event timestamps, one-shot
+  # reads. The foreground service that drives it lives in android/app.
   roameter:
     path: packages/roameter
-  flutter_local_notifications: ^22.3.0
-  flutter_background_service: ^5.1.0
 
 dev_dependencies:
   flutter_test:

@@ -1,41 +1,33 @@
 import 'dart:async';
 import 'dart:ui';
 
+import 'package:flutter/widgets.dart';
+
 import 'package:flutter/foundation.dart'
     show debugPrint, kDebugMode, visibleForTesting;
-import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:roameter/roameter.dart';
 import 'formatting.dart';
 import 'notification_service.dart';
 import 'notification_throttle.dart';
 import 'preferences_service.dart';
 import 'service_channel.dart' as channel;
+import 'tracking_service.dart';
 import 'step_accumulator.dart';
 
+/// Starts the tracking service, registering [onServiceStart] as what it runs.
+/// Idempotent — starting a running service is a no-op on the platform side.
 Future<void> initializeBackgroundService() async {
-  final service = FlutterBackgroundService();
-
-  await service.configure(
-    androidConfiguration: AndroidConfiguration(
-      onStart: onServiceStart,
-      autoStart: false,
-      isForegroundMode: true,
-      autoStartOnBoot: true,
-      // Can't a dataSync foreground service from BOOT_COMPLETED
-      foregroundServiceTypes: [AndroidForegroundType.health],
-      notificationChannelId: NotificationService.channelId,
-      initialNotificationTitle: 'Roamfree',
-      initialNotificationContent: 'Starting…',
-      foregroundServiceNotificationId: NotificationService.notificationId,
-    ),
-    // No iOS equivalent for this feature — see prior discussion.
-    iosConfiguration: IosConfiguration(),
-  );
+  await TrackingService().start(onServiceStart);
 }
 
 /// The only place in the app that subscribes to the step sensor.
 @pragma('vm:entry-point')
-void onServiceStart(ServiceInstance service) async {
+void onServiceStart() async {
+  // This isolate is entered directly from Kotlin, so nothing has set up the
+  // binding the way a normal app launch would. Every platform channel below —
+  // notifications, preferences, sqflite, the sensor — needs it first.
+  WidgetsFlutterBinding.ensureInitialized();
+
   // TEMP DIAGNOSTIC — stepUpdate seen doubled once, not reproduced since.
   // Distinct tags per isolate would confirm two service starts.
   final isolateTag = DateTime.now().microsecondsSinceEpoch.toRadixString(36);
@@ -44,6 +36,7 @@ void onServiceStart(ServiceInstance service) async {
   }
 
   DartPluginRegistrant.ensureInitialized();
+  final service = TrackingServiceInstance();
   await NotificationService.init();
 
   final prefsService = PreferencesService();
@@ -54,19 +47,12 @@ void onServiceStart(ServiceInstance service) async {
   // Same idea for the notification: rewriting it per step is wasted work.
   final notifications = NotificationThrottle();
 
-  if (service is AndroidServiceInstance) {
-    service.on('setAsForeground').listen((event) {
-      service.setAsForegroundService();
-    });
-    service.on('setAsBackground').listen((event) {
-      service.setAsBackgroundService();
-    });
-  }
+  // No foreground/background toggle: this service is only ever foreground.
   service.on('stopService').listen((event) async {
     // Commit before going away: neither flush timer gets another chance.
     await stepStore.flush();
     await notifications.flush();
-    service.stopSelf();
+    await service.stopSelf();
   });
 
   // All day/hour/manual bookkeeping lives here. This isolate keeps no copy of

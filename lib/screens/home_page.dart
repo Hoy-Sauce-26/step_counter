@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../services/background_service.dart';
+import '../services/tracking_service.dart';
 import '../services/formatting.dart';
 import '../services/metrics.dart';
 import '../services/pedometer_service.dart';
@@ -73,9 +73,9 @@ class _HomePageState extends ConsumerState<HomePage>
     if (!_permissionGranted || _ensuringBackgroundService) return;
     _ensuringBackgroundService = true;
     try {
-      final bgService = FlutterBackgroundService();
+      final bgService = TrackingService();
       if (!await bgService.isRunning()) {
-        await bgService.startService();
+        await bgService.start(onServiceStart);
       } else {
         // "Running" per Android — see [stalledFor] for why that's weaker
         // than it sounds.
@@ -116,12 +116,8 @@ class _HomePageState extends ConsumerState<HomePage>
     );
   }
 
-  /// Stops the service before starting it again — `startService()` alone is
-  /// a no-op while the plugin's own `isRunning` flag is still set. False if
-  /// it wouldn't stop.
-  Future<bool> _restartBackgroundService(
-    FlutterBackgroundService bgService,
-  ) async {
+  /// Stops the service before starting it again. False if it wouldn't stop.
+  Future<bool> _restartBackgroundService(TrackingService bgService) async {
     bgService.invoke('stopService');
     // Polled, with a ceiling so a service that refuses to stop can't hang
     // the resume path.
@@ -136,7 +132,7 @@ class _HomePageState extends ConsumerState<HomePage>
     // Starting a service that never stopped is a no-op.
     if (!stopped) return false;
 
-    await bgService.startService();
+    await bgService.start(onServiceStart);
     return bgService.isRunning();
   }
 

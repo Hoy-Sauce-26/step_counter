@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:step_counter/services/background_service.dart';
 import 'package:step_counter/services/database_helper.dart';
 import 'package:step_counter/services/notification_service.dart';
 
@@ -12,7 +11,9 @@ void main() async {
 
   await NotificationService.init();
   await NotificationService.requestPermissions();
-  await initializeBackgroundService();
+  // Not started here: HomePage starts it once activity permission is granted,
+  // and starting a service that immediately finds no permission would only
+  // put a notification up for something that can't count yet.
 
   runApp(const ProviderScope(child: StepCounterApp()));
 }
