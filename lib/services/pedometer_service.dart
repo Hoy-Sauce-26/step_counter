@@ -135,6 +135,10 @@ class PedometerService {
 
       final service = FlutterBackgroundService();
 
+      // TEMP DIAGNOSTIC — see BackgroundService.onServiceStart.
+      if (kDebugMode) {
+        debugPrint('[PedometerService] SUBSCRIBING to stepUpdate');
+      }
       _bgStepSubscription = channel.stepUpdate.listen(service, (update) {
         _liveStepsDate = update.date;
         debugPrint('[PedometerService] stepUpdate from background service: '
@@ -152,6 +156,10 @@ class PedometerService {
 
       _bgSensorStatusSubscription =
           channel.sensorStatus.listen(service, setSensorAvailable);
+
+      // Both reads below are of keys the service isolate owns — reload or
+      // this answers from a stale start-up snapshot.
+      await _prefsService.reload();
 
       // A route in progress across an app restart has no live broadcast to
       // catch up on — the service only emits on a reading.
@@ -173,30 +181,20 @@ class PedometerService {
     }
   }
 
-  /// Whether the app is on screen. Drives the step-*detector* subscription in
-  /// [_applyForegroundSensing] — see that method for why that matters.
+  /// Whether the app is on screen — drives [_applyForegroundSensing].
   void setForegroundSensing(bool enabled) {
     if (_foregroundSensing == enabled) return;
     _foregroundSensing = enabled;
     _applyForegroundSensing();
   }
 
-  /// Subscribes to the step detector while the app is on screen, and drops
-  /// the subscription when it isn't.
+  /// Subscribes to the step detector while on screen, drops it otherwise.
   ///
-  /// Nothing consumes [walkingStatusStream]. The subscription is kept anyway
-  /// because removing it outright made step *counts* arrive in laggy batches
-  /// instead of one at a time: `TYPE_STEP_DETECTOR` is registered at
-  /// `SENSOR_DELAY_FASTEST` with no batch latency, which holds the sensor
-  /// pipeline open and makes `TYPE_STEP_COUNTER` deliver each reading as it
-  /// happens. The real-time counter is a side effect of this listener.
-  ///
-  /// That side effect is only worth its power draw while somebody is looking
-  /// at it. A backgrounded Flutter app keeps its engine — and therefore this
-  /// subscription — alive until Android reclaims it, which can be hours of
-  /// waking the CPU per step for a screen nobody is on. Gating on foreground
-  /// keeps the live feel exactly where it is visible and stops paying for it
-  /// everywhere else; the background service keeps counting either way.
+  /// Nothing consumes [walkingStatusStream] directly — this subscription is
+  /// kept because `TYPE_STEP_DETECTOR` at `SENSOR_DELAY_FASTEST` holds the
+  /// sensor pipeline open, which is what makes `TYPE_STEP_COUNTER` deliver
+  /// per-step instead of in laggy batches. Worth the power draw only while
+  /// the screen is on; the background service counts regardless.
   void _applyForegroundSensing() {
     if (!_started) return;
 

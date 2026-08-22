@@ -2,18 +2,18 @@ import 'package:flutter/material.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../services/background_service.dart';
+import '../services/formatting.dart';
 import '../services/metrics.dart';
 import '../services/pedometer_service.dart';
 import '../services/providers.dart';
 import '../widgets/add_steps_dialog.dart';
-import '../widgets/calibration_dialog.dart';
 import '../widgets/charts/weekly_bar_chart.dart';
-import '../widgets/edit_target_dialog.dart';
 import '../widgets/hourly_breakdown_dialog.dart';
 import '../widgets/metric_card.dart';
-import '../widgets/personalize_dialog.dart';
 import '../widgets/step_progress_ring.dart';
 import 'routes_page.dart';
+import 'settings_page.dart';
 
 class HomePage extends ConsumerStatefulWidget {
   const HomePage({super.key});
@@ -32,6 +32,12 @@ class _HomePageState extends ConsumerState<HomePage>
   bool _ensuringBackgroundService = false;
   bool _backgroundServiceFailed = false;
 
+  /// How long tracking was silent, or null once dismissed.
+  Duration? _recoveredStallGap;
+
+  /// Whether the battery-optimizer prompt should show.
+  bool _showBatteryPrompt = false;
+
   @override
   void initState() {
     super.initState();
@@ -48,8 +54,6 @@ class _HomePageState extends ConsumerState<HomePage>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      // The live per-step counter costs a sensor subscription to run — see
-      // PedometerService._applyForegroundSensing. Worth it on screen.
       ref.read(pedometerServiceProvider).setForegroundSensing(true);
 
       // Re-sync on resume, so a date rollover while the app was closed
@@ -62,6 +66,8 @@ class _HomePageState extends ConsumerState<HomePage>
       // Restart the background service if something killed it (OEM
       // battery manager, etc.) instead of tracking staying off silently.
       _ensureBackgroundServiceRunning();
+
+      _refreshBatteryPrompt();
     }
 
     // Only paused/detached, never inactive: inactive fires for a pulled-down
@@ -78,9 +84,21 @@ class _HomePageState extends ConsumerState<HomePage>
     _ensuringBackgroundService = true;
     try {
       final bgService = FlutterBackgroundService();
-      final isRunning = await bgService.isRunning();
-      if (!isRunning) {
+      if (!await bgService.isRunning()) {
         await bgService.startService();
+      } else {
+        // "Running" per Android — see [stalledFor] for why that's weaker
+        // than it sounds.
+        final stalled = await _stalledDuration();
+        if (stalled != null) {
+          if (await _restartBackgroundService(bgService)) {
+            if (mounted) setState(() => _recoveredStallGap = stalled);
+          } else {
+            // Won't restart — show the failure banner, not a false recovery.
+            if (mounted) setState(() => _backgroundServiceFailed = true);
+            return;
+          }
+        }
       }
       if (mounted && _backgroundServiceFailed) {
         setState(() => _backgroundServiceFailed = false);
@@ -94,6 +112,42 @@ class _HomePageState extends ConsumerState<HomePage>
     } finally {
       _ensuringBackgroundService = false;
     }
+  }
+
+  /// How long the background service has been silent, if enough to count.
+  Future<Duration?> _stalledDuration() async {
+    final prefs = ref.read(preferencesServiceProvider);
+    // The heartbeat is written by the other isolate — reload or this answers
+    // from a stale snapshot taken at app start.
+    await prefs.reload();
+    return stalledFor(
+      lastHeartbeat: await prefs.getServiceHeartbeat(),
+      now: DateTime.now(),
+    );
+  }
+
+  /// Stops the service before starting it again — `startService()` alone is
+  /// a no-op while the plugin's own `isRunning` flag is still set. False if
+  /// it wouldn't stop.
+  Future<bool> _restartBackgroundService(
+    FlutterBackgroundService bgService,
+  ) async {
+    bgService.invoke('stopService');
+    // Polled, with a ceiling so a service that refuses to stop can't hang
+    // the resume path.
+    var stopped = false;
+    for (var i = 0; i < 20; i++) {
+      if (!await bgService.isRunning()) {
+        stopped = true;
+        break;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    }
+    // Starting a service that never stopped is a no-op.
+    if (!stopped) return false;
+
+    await bgService.startService();
+    return bgService.isRunning();
   }
 
   Future<void> _ensurePermission() async {
@@ -122,6 +176,43 @@ class _HomePageState extends ConsumerState<HomePage>
     // granted, so it bailed out.
     await ref.read(pedometerServiceProvider).start();
     await _ensureBackgroundServiceRunning();
+    await _refreshBatteryPrompt();
+  }
+
+  /// Null means the platform couldn't say — stays quiet rather than nagging
+  /// on a guess.
+  Future<void> _refreshBatteryPrompt() async {
+    final exempt = await ref.read(systemSettingsProvider).isBatteryExempt();
+    if (exempt != false) {
+      if (mounted && _showBatteryPrompt) {
+        setState(() => _showBatteryPrompt = false);
+      }
+      return;
+    }
+    final dismissed =
+        await ref.read(preferencesServiceProvider).getBatteryPromptDismissed();
+    if (!mounted) return;
+    setState(() => _showBatteryPrompt = !dismissed);
+  }
+
+  Future<void> _openBatterySettings() async {
+    final opened = await ref.read(systemSettingsProvider).openBatteryOptimizationSettings();
+    if (opened || !mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          "This phone doesn't have the standard battery screen — look for "
+          'battery or power settings under Roamfree in Settings.',
+        ),
+      ),
+    );
+  }
+
+  Future<void> _dismissBatteryPrompt() async {
+    setState(() => _showBatteryPrompt = false);
+    await ref
+        .read(preferencesServiceProvider)
+        .setBatteryPromptDismissed(true);
   }
 
   Future<void> _openPermissionSettings() async {
@@ -162,24 +253,37 @@ class _HomePageState extends ConsumerState<HomePage>
       loading: () => const Center(child: CircularProgressIndicator()),
       error: (err, st) => Center(child: Text('Sensor error: $err')),
     );
-    if (!_backgroundServiceFailed) return content;
+    // At most one banner, in priority order — stacking them pushes the ring
+    // off screen.
+    final gap = _recoveredStallGap;
+    final Widget? banner;
+    if (_backgroundServiceFailed) {
+      banner = _BackgroundServiceFailedBanner(
+        onRetry: _ensureBackgroundServiceRunning,
+      );
+    } else if (gap != null) {
+      banner = _TrackingRecoveredBanner(
+        stalledFor: gap,
+        onDismiss: () => setState(() => _recoveredStallGap = null),
+      );
+    } else if (_showBatteryPrompt) {
+      banner = _BatteryOptimizationBanner(
+        onOpenSettings: _openBatterySettings,
+        onDismiss: _dismissBatteryPrompt,
+      );
+    } else {
+      banner = null;
+    }
+    if (banner == null) return content;
 
-    // Sits above the counts rather than replacing them: the stored total is
-    // still real and worth showing, it just isn't advancing.
     return Column(
-      children: [
-        _BackgroundServiceFailedBanner(
-          onRetry: _ensureBackgroundServiceRunning,
-        ),
-        Expanded(child: content),
-      ],
+      children: [banner, Expanded(child: content)],
     );
   }
 
   @override
   Widget build(BuildContext context) {
     final target = ref.watch(dailyTargetProvider);
-    final calibrationFactor = ref.watch(calibrationFactorProvider);
     final stepsPerMinute = ref.watch(stepsPerMinuteProvider);
     final heightCm = ref.watch(heightCmProvider);
     final weightKg = ref.watch(weightKgProvider);
@@ -194,58 +298,20 @@ class _HomePageState extends ConsumerState<HomePage>
         title: const Text('Roamfree'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.person_outline),
-            tooltip: 'Personalize',
-            onPressed: () async {
-              final result = await showPersonalizeDialog(
-                context,
-                currentHeightCm: heightCm,
-                currentWeightKg: weightKg,
-                currentUnitSystem: unitSystem,
-              );
-              if (result != null) {
-                ref.read(heightCmProvider.notifier).update(result.heightCm);
-                ref.read(weightKgProvider.notifier).update(result.weightKg);
-                ref.read(unitSystemProvider.notifier).update(result.unitSystem);
-              }
-            },
-          ),
-          IconButton(
-            icon: const Icon(Icons.tune),
-            tooltip: 'Calibration',
-            onPressed: () async {
-              final pedometerService = ref.read(pedometerServiceProvider);
-              final result = await showCalibrationDialog(
-                context,
-                calibrationFactor,
-                stepsPerMinute,
-                pedometerService,
-              );
-              if (result == null) return;
-              ref
-                  .read(calibrationFactorProvider.notifier)
-                  .update(result.correctionFactor);
-              ref
-                  .read(stepsPerMinuteProvider.notifier)
-                  .update(result.stepsPerMinute);
-            },
-          ),
-          IconButton(
-            icon: const Icon(Icons.flag_outlined),
-            tooltip: 'Set daily target',
-            onPressed: () async {
-              final newTarget = await showEditTargetDialog(context, target);
-              if (newTarget != null) {
-                ref.read(dailyTargetProvider.notifier).update(newTarget);
-              }
-            },
-          ),
-          IconButton(
             icon: const Icon(Icons.route),
             tooltip: 'My Routes',
             onPressed: () {
               Navigator.of(context).push(
                 MaterialPageRoute(builder: (context) => const RoutesPage()),
+              );
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.settings_outlined),
+            tooltip: 'Settings',
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (context) => const SettingsPage()),
               );
             },
           ),
@@ -440,6 +506,70 @@ class _PermissionBlocked extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Offers the battery-optimizer exemption, once — dismissing is permanent.
+class _BatteryOptimizationBanner extends StatelessWidget {
+  final VoidCallback onOpenSettings;
+  final VoidCallback onDismiss;
+
+  const _BatteryOptimizationBanner({
+    required this.onOpenSettings,
+    required this.onDismiss,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return MaterialBanner(
+      backgroundColor: theme.colorScheme.surfaceContainerHighest,
+      leading: Icon(
+        Icons.battery_saver_outlined,
+        color: theme.colorScheme.onSurfaceVariant,
+      ),
+      content: Text(
+        'Android can stop Roamfree in the background to save power, which '
+        'makes it miss steps. Letting it run unrestricted keeps your count '
+        'complete.',
+        style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
+      ),
+      actions: [
+        TextButton(onPressed: onDismiss, child: const Text('Not now')),
+        TextButton(onPressed: onOpenSettings, child: const Text('Open settings')),
+      ],
+    );
+  }
+}
+
+/// Shown after a stalled service is caught and restarted — not an error,
+/// since today's count has already caught up. What's actually lost is any
+/// full day the service missed, which this says plainly.
+class _TrackingRecoveredBanner extends StatelessWidget {
+  final Duration stalledFor;
+  final VoidCallback onDismiss;
+
+  const _TrackingRecoveredBanner({
+    required this.stalledFor,
+    required this.onDismiss,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return MaterialBanner(
+      backgroundColor: theme.colorScheme.surfaceContainerHighest,
+      leading: Icon(Icons.history, color: theme.colorScheme.onSurfaceVariant),
+      content: Text(
+        'Step tracking stopped for ${formatApproximateDuration(stalledFor)} '
+        "and has restarted. Today's count has caught up, but a full day it "
+        'missed will read zero.',
+        style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
+      ),
+      actions: [
+        TextButton(onPressed: onDismiss, child: const Text('Dismiss')),
+      ],
     );
   }
 }

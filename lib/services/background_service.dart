@@ -1,7 +1,8 @@
 import 'dart:async';
 import 'dart:ui';
 
-import 'package:flutter/foundation.dart' show visibleForTesting;
+import 'package:flutter/foundation.dart'
+    show debugPrint, kDebugMode, visibleForTesting;
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:pedometer/pedometer.dart';
 import 'formatting.dart';
@@ -35,6 +36,13 @@ Future<void> initializeBackgroundService() async {
 /// This is the only place in the app that calls `Pedometer.stepCountStream.listen()`
 @pragma('vm:entry-point')
 void onServiceStart(ServiceInstance service) async {
+  // TEMP DIAGNOSTIC — stepUpdate seen doubled once, not reproduced since.
+  // Distinct tags per isolate would confirm two service starts.
+  final isolateTag = DateTime.now().microsecondsSinceEpoch.toRadixString(36);
+  if (kDebugMode) {
+    debugPrint('[BackgroundService] onServiceStart ENTER tag=$isolateTag');
+  }
+
   DartPluginRegistrant.ensureInitialized();
   await NotificationService.init();
 
@@ -43,10 +51,7 @@ void onServiceStart(ServiceInstance service) async {
   // Buffered rather than written straight through:
   final stepStore = ThrottledStepStore(PersistentStepStore());
 
-  // Same idea for the notification: a rewrite per step is invisible to the
-  // reader and expensive to the system. Every update below goes through this,
-  // including the immediate ones — they stay immediate unless a step landed
-  // in the last second, and the trailing send covers them if one did.
+  // Same idea for the notification: rewriting it per step is wasted work.
   final notifications = NotificationThrottle();
 
   if (service is AndroidServiceInstance) {
@@ -157,10 +162,15 @@ void onServiceStart(ServiceInstance service) async {
     () => activeRoute != null,
   );
 
-  bool sensorStatusRecorded = false;
+  // Proof of life for [stalledFor] — immediately, then on a timer.
+  Future<void> recordHeartbeat() =>
+      prefsService.setServiceHeartbeat(DateTime.now());
+  await recordHeartbeat();
+  Timer.periodic(serviceHeartbeatInterval, (_) => recordHeartbeat());
+
+  final sensorStatusLatch = SensorStatusLatch();
   Future<void> recordSensorStatus(bool available) async {
-    if (sensorStatusRecorded) return;
-    sensorStatusRecorded = true;
+    if (!sensorStatusLatch.accept(available)) return;
     await prefsService.setStepSensorAvailable(available);
     channel.sensorStatus.send(service, available);
     if (!available) {
@@ -193,9 +203,8 @@ void onServiceStart(ServiceInstance service) async {
       );
       final routeSteps = progress.steps;
 
-      // Compared before the assignments below overwrite them. A reading that
-      // moves nothing rewrites the whole prefs file for an identical value —
-      // and SharedPreferences.setString is a blocking, fsync'd commit.
+      // Skip the write if nothing moved — avoids an fsync'd commit for an
+      // unchanged value.
       final routeStateChanged = progress.rawBaseline != route['rawBaseline'] ||
           progress.stepsBefore != route['stepsBefore'] ||
           routeSteps != route['steps'] ||
@@ -231,14 +240,19 @@ void onServiceStart(ServiceInstance service) async {
           ));
     }
 
+    // TEMP DIAGNOSTIC — see onServiceStart.
+    if (kDebugMode) {
+      debugPrint('[BackgroundService] send stepUpdate=$displaySteps '
+          'tag=$isolateTag');
+    }
+
     // The date rides along so the app can tell a live figure from a stored
     // one when deciding which of the two is current.
     channel.stepUpdate.send(
       service,
       channel.StepUpdate(steps: displaySteps, date: reading.date),
     );
-    // Only the calibration test and the route baseline consume this, and
-    // both care about the value rather than the event. Repeats carry nothing.
+    // Repeats carry nothing the calibration test or route baseline needs.
     if (rawChanged) channel.rawStep.send(service, event.steps);
   }, onError: (Object error) async {
     // Need this handler here for devices with no step sensor.
@@ -266,6 +280,42 @@ void _scheduleMidnightNotificationReset(
     }
     _scheduleMidnightNotificationReset(currentTarget, isRouteActive);
   });
+}
+
+/// How often the service records that it is alive and still listening.
+const Duration serviceHeartbeatInterval = Duration(minutes: 15);
+
+/// Three missed heartbeats before the app treats tracking as stopped, so one
+/// Doze-delayed timer isn't mistaken for a dead service.
+const Duration serviceHeartbeatTimeout = Duration(minutes: 45);
+
+/// How long tracking has been silent, or null if that's within tolerance.
+/// `isRunning()` only says an Android service object exists, not that the
+/// isolate inside it is alive — this is the actual liveness question.
+Duration? stalledFor({
+  required DateTime? lastHeartbeat,
+  required DateTime now,
+  Duration timeout = serviceHeartbeatTimeout,
+}) {
+  if (lastHeartbeat == null) return null;
+  final age = now.difference(lastHeartbeat);
+  if (age.isNegative || age <= timeout) return null;
+  return age;
+}
+
+/// A positive sensor report is terminal — hardware that produced a reading
+/// exists. A negative one isn't: it can be a startup race, and latching it
+/// would strand the user on "no sensor" until something overwrites it.
+class SensorStatusLatch {
+  bool? _recorded;
+
+  /// Whether [available] says something not already said. Records it if so.
+  bool accept(bool available) {
+    if (_recorded == true) return false;
+    if (_recorded == available) return false;
+    _recorded = available;
+    return true;
+  }
 }
 
 /// An in-progress route's counters after folding in one raw reading.

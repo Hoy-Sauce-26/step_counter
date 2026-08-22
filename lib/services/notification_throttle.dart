@@ -1,22 +1,8 @@
 import 'dart:async';
 
-/// Rate-limits rewrites of the foreground notification.
-///
-/// The notification is rewritten on every sensor reading — up to twice a
-/// second while walking — and each rewrite is a platform-channel hop, an IPC
-/// to `NotificationManagerService` and a SystemUI relayout. Nobody can read a
-/// number that changes faster than about once a second, so updates are
-/// collapsed into [interval].
-///
-/// The first update in a quiet period goes out immediately, which is what
-/// keeps the notification feeling live. Anything arriving during the window
-/// is held, and the most recent one is sent when the window ends — held
-/// updates would only overwrite each other anyway, since they all target the
-/// same notification id.
-///
-/// The trailing send is the load-bearing part: the last reading of a walk
-/// always reaches the notification, so it can never settle showing a stale
-/// total just because the walk ended inside a quiet window.
+/// Rate-limits rewrites of the foreground notification: leading edge fires
+/// immediately, anything arriving inside [interval] is coalesced into one
+/// trailing send so the last reading of a walk always lands.
 class NotificationThrottle {
   NotificationThrottle({
     this.interval = const Duration(seconds: 1),
@@ -30,8 +16,6 @@ class NotificationThrottle {
   Future<void> Function()? _pending;
   Timer? _timer;
 
-  /// Runs [send] now if the last send is at least [interval] old, otherwise
-  /// holds it until the window ends.
   void run(Future<void> Function() send) {
     final now = _clock();
     final last = _lastSentAt;
@@ -44,17 +28,16 @@ class NotificationThrottle {
     }
 
     _pending = send;
-    // `??=` rather than a reschedule: the window is measured from the last
-    // send, so a later arrival must not push the trailing send further out.
+    // ??= : the window is measured from the last send, so a later arrival
+    // must not push the trailing send further out.
     _timer ??= Timer(interval - sinceLast, () {
       _timer = null;
       unawaited(flush());
     });
   }
 
-  /// Sends whatever is still held. Called on the timer, and directly before
-  /// the service stops — a timer that never fires would otherwise leave the
-  /// notification one update behind for as long as it stays on screen.
+  /// Sends whatever is still held. Also called directly before the service
+  /// stops, since a timer that never fires would leave it one update behind.
   Future<void> flush() async {
     _timer?.cancel();
     _timer = null;

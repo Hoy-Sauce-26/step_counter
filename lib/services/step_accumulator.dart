@@ -136,16 +136,9 @@ class StepAccumulator {
 
     await _store.writeDailySteps(date, displaySteps);
     await _store.writeHourlySteps(date, hour, hourlySteps);
-    // Written on every reading that moves and never buffered. A stale value
-    // is a no-no.
-    //
-    // A reading that repeats the previous one is skipped, though: it costs a
-    // blocking, fsync'd whole-file SharedPreferences commit to store a value
-    // already stored, and some OEM sensor stacks re-report the same
-    // cumulative count rather than only reporting changes. Only the
-    // timestamp goes stale, and a carried-over reading equal to the current
-    // one contributes a zero delta whether it is carried or dropped — so
-    // nothing downstream can tell the difference.
+    // Skip the write if the reading repeats the last one — some OEM sensor
+    // stacks re-report an unchanged count, and re-persisting it costs a
+    // blocking, fsync'd SharedPreferences commit for no behavior change.
     final rawMoved = rawCumulative != previousRaw;
     _lastRawSteps = rawCumulative;
     _lastRawAt = now;
