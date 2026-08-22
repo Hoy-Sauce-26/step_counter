@@ -29,8 +29,8 @@ void onServiceStart() async {
   // notifications, preferences, sqflite, the sensor — needs it first.
   WidgetsFlutterBinding.ensureInitialized();
 
-  // TEMP DIAGNOSTIC — stepUpdate seen doubled once, not reproduced since.
-  // Distinct tags per isolate would confirm two service starts.
+  // Traces service lifecycle: two tags in one process means two isolates,
+  // which is what a duplicate start looks like from Dart.
   final isolateTag = DateTime.now().microsecondsSinceEpoch.toRadixString(36);
   if (kDebugMode) {
     debugPrint('[BackgroundService] onServiceStart ENTER tag=$isolateTag');
@@ -175,11 +175,6 @@ void onServiceStart() async {
   // Phase 4 turns this down for the sampler, where nobody is watching.
   const roameter = Roameter();
   roameter.stepCounts(batchLatency: Duration.zero).listen((event) async {
-    // The event's own `timestamp` is deliberately not used for bucketing yet.
-    // With zero batching it matches arrival to within milliseconds, except on
-    // the first reading after a restart, which carries the time the count last
-    // changed — possibly yesterday. Attributing by event time is Phase 5.1's
-    // job and needs that case handled; this keeps today's semantics exactly.
     final now = DateTime.now();
 
     final rawChanged = lastKnownRawSteps != event.steps;
@@ -192,7 +187,15 @@ void onServiceStart() async {
       await projection.backfillFromStoredTotal(event.steps, now);
     }
 
-    final reading = await counter.record(event.steps, now);
+    // The event's own time, not arrival: a reading buffered through a device
+    // sleep stands for the moment the counter reached it, which is when the
+    // walking happened. StepProjection refuses anything out of order, so a
+    // stale timestamp can only file just after the last reading, never before.
+    final reading = await counter.record(
+      event.steps,
+      now,
+      observedAt: event.timestamp,
+    );
     final displaySteps = reading.displaySteps;
 
     // Steps always count toward the daily total above regardless of an
@@ -246,12 +249,6 @@ void onServiceStart() async {
             steps: displaySteps,
             target: dailyTarget,
           ));
-    }
-
-    // TEMP DIAGNOSTIC — see onServiceStart.
-    if (kDebugMode) {
-      debugPrint('[BackgroundService] send stepUpdate=$displaySteps '
-          'tag=$isolateTag');
     }
 
     // The date rides along so the app can tell a live figure from a stored

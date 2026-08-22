@@ -101,6 +101,10 @@ class DatabaseHelper {
             )
           ''');
         }
+        // else-if, not a second if: _createRouteTables already builds
+        // route_sessions under its current name, so a v1 or v2 install has
+        // nothing to rename. Only a v3 install, which has the table under the
+        // old name, needs the rename below.
         if (oldVersion < 3) {
           await _createRouteTables(db);
         } else if (oldVersion < 4) {

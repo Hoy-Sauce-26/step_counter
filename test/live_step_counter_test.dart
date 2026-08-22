@@ -138,4 +138,65 @@ void main() {
         reason: 'the steps since the last write must not wait on a timer '
             'that will never fire');
   });
+
+  group('event times', () {
+    test('a reading buffered through a sleep is filed when it happened',
+        () async {
+      await counter.record(1000, today(22, 0));
+
+      // Delivered at 07:00 the next morning, but the counter reached this
+      // value at 22:30 the night before.
+      final morning = today(22, 0).add(const Duration(hours: 9));
+      await counter.record(
+        1200,
+        morning,
+        observedAt: today(22, 30),
+      );
+
+      final entries = await db.getJournalEntriesSince(
+        DateTime.fromMillisecondsSinceEpoch(0),
+      );
+      expect(entries.last.at.hour, 22,
+          reason: 'a night walk belongs to the night, not to the morning '
+              'the phone happened to wake up in');
+    });
+
+    test('an event time in the future is refused', () async {
+      await counter.record(1000, today(9, 0));
+
+      await counter.record(
+        1100,
+        today(9, 6),
+        observedAt: today(23, 0),
+      );
+
+      final entries = await db.getJournalEntriesSince(
+        DateTime.fromMillisecondsSinceEpoch(0),
+      );
+      expect(entries.last.at.hour, 9,
+          reason: 'nothing can have been observed in the future');
+    });
+
+    test('no event time falls back to now', () async {
+      await counter.record(1000, today(9, 0));
+      await counter.record(1100, today(9, 6));
+
+      final entries = await db.getJournalEntriesSince(
+        DateTime.fromMillisecondsSinceEpoch(0),
+      );
+      expect(entries.last.at.minute, 6);
+    });
+
+    test('journal cadence still follows the wall clock, not event times',
+        () async {
+      await counter.record(1000, today(9, 0));
+
+      // Event time way back, but only a minute of real time has passed.
+      await counter.record(1100, today(9, 1), observedAt: today(8, 0));
+
+      expect(await journalledCount(), 1,
+          reason: 'how often to journal is a question about elapsed real '
+              'time, not about when the steps happened');
+    });
+  });
 }

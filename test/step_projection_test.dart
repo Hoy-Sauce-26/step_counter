@@ -279,4 +279,77 @@ void main() {
       );
     });
   });
+
+  group('journal ordering', () {
+    test('an entry after the newest one keeps its own time', () async {
+      final t = ago(const Duration(hours: 2));
+      await journal(t, 1000);
+
+      await projection.record(
+        StepJournalEntry(at: t.add(const Duration(minutes: 5)), rawSteps: 1100),
+      );
+
+      final latest = await db.getLatestJournalEntry();
+      expect(latest?.at.millisecondsSinceEpoch,
+          t.add(const Duration(minutes: 5)).millisecondsSinceEpoch);
+    });
+
+    test('a late arrival files just after the newest, never before',
+        () async {
+      final t = ago(const Duration(hours: 2));
+      await journal(t, 1000);
+
+      // A reading buffered through a sleep, arriving with a stale event time
+      // that predates something the sampler already wrote.
+      await projection.record(
+        StepJournalEntry(at: t.subtract(const Duration(hours: 1)), rawSteps: 1100),
+      );
+
+      final entries = await db.getJournalEntriesSince(
+        DateTime.fromMillisecondsSinceEpoch(0),
+      );
+      expect(entries.last.at.isAfter(t), isTrue);
+      expect(entries.last.rawSteps, 1100);
+    });
+
+    test('a late arrival is never mistaken for a reboot', () async {
+      // Without ordering this is the catastrophic case: sorted by time the
+      // raw count appears to fall from 1100 to 1000, which the fold reads as
+      // a reboot and credits as a whole thousand steps.
+      final t = ago(const Duration(hours: 2));
+      await journal(t, 1100);
+
+      await projection.record(
+        StepJournalEntry(at: t.subtract(const Duration(hours: 1)), rawSteps: 1150),
+      );
+      await projection.project();
+
+      expect((await db.getStepsForDate(key(t)))?.stepCount, 50,
+          reason: 'fifty steps happened, not eleven hundred');
+    });
+
+    test('ordering holds across many out-of-order arrivals', () async {
+      final t = ago(const Duration(hours: 3));
+      await journal(t, 1000);
+
+      for (var i = 1; i <= 5; i++) {
+        await projection.record(StepJournalEntry(
+          // Each one claims to predate the last written entry.
+          at: t.subtract(Duration(minutes: i * 10)),
+          rawSteps: 1000 + i * 20,
+        ));
+      }
+
+      final entries = await db.getJournalEntriesSince(
+        DateTime.fromMillisecondsSinceEpoch(0),
+      );
+      for (var i = 1; i < entries.length; i++) {
+        expect(entries[i].at.isAfter(entries[i - 1].at), isTrue,
+            reason: 'entry $i landed at or before its predecessor');
+        expect(entries[i].rawSteps, greaterThanOrEqualTo(entries[i - 1].rawSteps),
+            reason: 'time order is what keeps raw order, and raw order is '
+                'what makes the reboot rule sound');
+      }
+    });
+  });
 }

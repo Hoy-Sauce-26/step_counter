@@ -145,7 +145,8 @@ class PedometerService {
 
       final service = TrackingService();
 
-      // TEMP DIAGNOSTIC — see BackgroundService.onServiceStart.
+      // One line per subscription actually created; two would mean the app
+      // is listening twice and double-counting every report.
       if (kDebugMode) {
         debugPrint('[PedometerService] SUBSCRIBING to stepUpdate');
       }
@@ -216,8 +217,9 @@ class PedometerService {
 
       _localSubscription = _sensor
           .stepCounts(batchLatency: Duration.zero)
-          .listen((reading) => recordLocalReading(reading.steps), onError:
-              (Object error) {
+          .listen((reading) =>
+              recordLocalReading(reading.steps, null, reading.timestamp),
+              onError: (Object error) {
         debugPrint('[PedometerService] local counting failed: $error');
       });
     } finally {
@@ -240,19 +242,23 @@ class PedometerService {
   /// or a permission to ask for. The bug it guards against was the display
   /// never being written to at all while the service was off.
   @visibleForTesting
-  Future<void> recordLocalReading(int rawSteps, [DateTime? now]) async {
+  Future<void> recordLocalReading(
+    int rawSteps, [
+    DateTime? now,
+    DateTime? observedAt,
+  ]) async {
     final counter = _localCounter;
     if (counter == null) return;
 
     _lastKnownRawSteps = rawSteps;
     _rawCumulativeController.add(rawSteps);
 
-    final live = await counter.record(rawSteps, now ?? DateTime.now());
+    final live = await counter.record(
+      rawSteps,
+      now ?? DateTime.now(),
+      observedAt: observedAt,
+    );
     _liveStepsDate = live.date;
-    if (kDebugMode) {
-      debugPrint('[PedometerService] local count raw=$rawSteps '
-          'display=${live.displaySteps}');
-    }
     _controller.add(live.displaySteps);
   }
 

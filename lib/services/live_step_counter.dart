@@ -46,9 +46,17 @@ class LiveStepCounter {
   int? _lastDisplaySteps;
   int? get lastDisplaySteps => _lastDisplaySteps;
 
-  Future<LiveReading> record(int rawSteps, DateTime now) async {
+  /// [observedAt] is the sensor's own event time, when there is one — the
+  /// moment the counter actually stood at [rawSteps], which for a reading
+  /// buffered through a device sleep is not the moment it arrived. Recording
+  /// it there is what keeps a night's walking on the night it happened.
+  Future<LiveReading> record(
+    int rawSteps,
+    DateTime now, {
+    DateTime? observedAt,
+  }) async {
     if (_shouldJournal(now)) {
-      await _journal(rawSteps, now);
+      await _journal(rawSteps, now, observedAt);
     }
 
     final since = _lastJournalledRaw == null
@@ -67,7 +75,7 @@ class LiveStepCounter {
 
   /// Commits the current reading. Called before the service stops, so the
   /// steps since the last write aren't waiting on a timer that never fires.
-  Future<void> flush(int rawSteps, DateTime now) => _journal(rawSteps, now);
+  Future<void> flush(int rawSteps, DateTime now) => _journal(rawSteps, now, null);
 
   /// Re-reads the derived total without journalling — for a manual credit,
   /// which changes the day's total without any reading having arrived.
@@ -84,11 +92,28 @@ class LiveStepCounter {
     return dateKey(last) != dateKey(now) || last.hour != now.hour;
   }
 
-  Future<void> _journal(int rawSteps, DateTime now) async {
-    await _projection.record(StepJournalEntry(at: now, rawSteps: rawSteps));
+  Future<void> _journal(
+    int rawSteps,
+    DateTime now,
+    DateTime? observedAt,
+  ) async {
+    await _projection.record(
+      StepJournalEntry(at: _recordTime(now, observedAt), rawSteps: rawSteps),
+    );
     _lastJournalledRaw = rawSteps;
+    // Wall clock, deliberately, even when the entry was filed earlier: this
+    // governs how often to journal, which is a question about elapsed real
+    // time rather than about when the steps happened.
     _lastJournalledAt = now;
     await _loadDerived(dateKey(now));
+  }
+
+  /// The event time when it is usable, otherwise now. Nothing can have been
+  /// observed in the future, and [StepProjection] refuses anything that would
+  /// land out of order, so this only has to reject the obviously wrong.
+  static DateTime _recordTime(DateTime now, DateTime? observedAt) {
+    if (observedAt == null || observedAt.isAfter(now)) return now;
+    return observedAt;
   }
 
   Future<void> _loadDerived(String date) async {

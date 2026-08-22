@@ -31,8 +31,31 @@ class StepProjection {
 
   /// Records a reading and re-derives everything the journal now covers.
   Future<void> record(StepJournalEntry entry) async {
-    await _db.appendJournalEntry(entry);
+    await _db.appendJournalEntry(await _inOrder(entry));
     await project();
+  }
+
+  /// Keeps journal timestamps strictly increasing.
+  ///
+  /// The fold reads a falling raw count as a reboot, and that reading is only
+  /// sound while entries are in order: two readings of one hardware counter
+  /// can disagree about which is larger only if they disagree about which
+  /// came first. Once entries can carry sensor event times — which may be
+  /// older than the moment they arrive — that ordering has to be enforced
+  /// rather than assumed, or a late arrival looks exactly like a reboot and
+  /// credits a whole counter's worth of steps.
+  ///
+  /// An entry that would land at or before the newest one is filed just after
+  /// it instead. That says the honest thing: it happened somewhere after the
+  /// last reading, and no more precisely than that.
+  Future<StepJournalEntry> _inOrder(StepJournalEntry entry) async {
+    final latest = await _db.getLatestJournalEntry();
+    if (latest == null || entry.at.isAfter(latest.at)) return entry;
+
+    return StepJournalEntry(
+      at: latest.at.add(const Duration(milliseconds: 1)),
+      rawSteps: entry.rawSteps,
+    );
   }
 
   /// Re-derives stored totals from the journal.
