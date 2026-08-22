@@ -15,6 +15,11 @@ class PreferencesService {
   static const double minCorrectionFactor = 0.9;
   static const double maxCorrectionFactor = 1.1;
 
+  // 60 is an amble, 150 is a near-jog. A stored value outside that came from
+  // a miscounted test, not a walker, so it is clamped rather than trusted.
+  static const double minStepsPerMinute = 60;
+  static const double maxStepsPerMinute = 150;
+
   Future<int> getDailyTarget() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getInt(_dailyTargetKey) ?? defaultDailyTarget;
@@ -33,6 +38,27 @@ class PreferencesService {
   Future<void> setCorrectionFactor(double factor) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setDouble(_correctionFactorKey, factor);
+  }
+
+  static const _stepsPerMinuteKey = 'stepsPerMinute';
+
+  /// The user's measured walking cadence. Drives active time directly and
+  /// calories through walking speed — see [StepMetrics.speedKmh]. App-side
+  /// only: the service isolate has no use for it, so unlike the correction
+  /// factor it needs no mirroring.
+  Future<double> getStepsPerMinute() async {
+    final prefs = await SharedPreferences.getInstance();
+    final stored = prefs.getDouble(_stepsPerMinuteKey);
+    if (stored == null) return StepMetrics.defaultStepsPerMinute;
+    return stored.clamp(minStepsPerMinute, maxStepsPerMinute);
+  }
+
+  Future<void> setStepsPerMinute(double stepsPerMinute) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(
+      _stepsPerMinuteKey,
+      stepsPerMinute.clamp(minStepsPerMinute, maxStepsPerMinute),
+    );
   }
 
   static const _lastRawReadingKey = 'lastRawReading';

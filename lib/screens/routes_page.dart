@@ -363,6 +363,7 @@ class _ActiveRouteViewState extends ConsumerState<_ActiveRouteView> {
     Duration elapsed,
     double? heightCm,
     double? weightKg,
+    double stepsPerMinute,
     UnitSystem unitSystem,
   ) {
     setState(() {
@@ -370,7 +371,12 @@ class _ActiveRouteViewState extends ConsumerState<_ActiveRouteView> {
         steps: steps,
         elapsed: elapsed,
         distance: StepMetrics.distance(steps, heightCm: heightCm, unit: unitSystem),
-        calories: StepMetrics.calories(steps, weightKg: weightKg),
+        calories: StepMetrics.calories(
+          steps,
+          weightKg: weightKg,
+          heightCm: heightCm,
+          stepsPerMinute: stepsPerMinute,
+        ),
       );
     });
   }
@@ -442,6 +448,7 @@ class _ActiveRouteViewState extends ConsumerState<_ActiveRouteView> {
     final theme = Theme.of(context);
     final heightCm = ref.watch(heightCmProvider);
     final weightKg = ref.watch(weightKgProvider);
+    final stepsPerMinute = ref.watch(stepsPerMinuteProvider);
     final unitSystem = ref.watch(unitSystemProvider);
     final liveSteps =
         ref.watch(activeRouteStepsProvider(widget.activeRoute.startTime)).value ??
@@ -454,8 +461,13 @@ class _ActiveRouteViewState extends ConsumerState<_ActiveRouteView> {
     final elapsed = summary?.elapsed ?? liveElapsed;
     final distance = summary?.distance ??
         StepMetrics.distance(steps, heightCm: heightCm, unit: unitSystem);
-    final calories =
-        summary?.calories ?? StepMetrics.calories(steps, weightKg: weightKg);
+    final calories = summary?.calories ??
+        StepMetrics.calories(
+          steps,
+          weightKg: weightKg,
+          heightCm: heightCm,
+          stepsPerMinute: stepsPerMinute,
+        );
 
     return Center(
       child: Padding(
@@ -500,6 +512,7 @@ class _ActiveRouteViewState extends ConsumerState<_ActiveRouteView> {
                       elapsed,
                       heightCm,
                       weightKg,
+                      stepsPerMinute,
                       unitSystem,
                     ),
                   ),

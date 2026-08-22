@@ -121,6 +121,7 @@ class _HomePageState extends ConsumerState<HomePage>
     required int target,
     required double? heightCm,
     required double? weightKg,
+    required double stepsPerMinute,
     required UnitSystem unitSystem,
     required bool? sensorAvailable,
   }) {
@@ -143,6 +144,7 @@ class _HomePageState extends ConsumerState<HomePage>
         target: target,
         heightCm: heightCm,
         weightKg: weightKg,
+        stepsPerMinute: stepsPerMinute,
         unitSystem: unitSystem,
       ),
       loading: () => const Center(child: CircularProgressIndicator()),
@@ -166,6 +168,7 @@ class _HomePageState extends ConsumerState<HomePage>
   Widget build(BuildContext context) {
     final target = ref.watch(dailyTargetProvider);
     final calibrationFactor = ref.watch(calibrationFactorProvider);
+    final stepsPerMinute = ref.watch(stepsPerMinuteProvider);
     final heightCm = ref.watch(heightCmProvider);
     final weightKg = ref.watch(weightKgProvider);
     final unitSystem = ref.watch(unitSystemProvider);
@@ -197,17 +200,22 @@ class _HomePageState extends ConsumerState<HomePage>
           ),
           IconButton(
             icon: const Icon(Icons.tune),
-            tooltip: 'Calibrate step count',
+            tooltip: 'Calibration',
             onPressed: () async {
               final pedometerService = ref.read(pedometerServiceProvider);
-              final newFactor = await showCalibrationDialog(
+              final result = await showCalibrationDialog(
                 context,
                 calibrationFactor,
+                stepsPerMinute,
                 pedometerService,
               );
-              if (newFactor != null) {
-                ref.read(calibrationFactorProvider.notifier).update(newFactor);
-              }
+              if (result == null) return;
+              ref
+                  .read(calibrationFactorProvider.notifier)
+                  .update(result.correctionFactor);
+              ref
+                  .read(stepsPerMinuteProvider.notifier)
+                  .update(result.stepsPerMinute);
             },
           ),
           IconButton(
@@ -237,6 +245,7 @@ class _HomePageState extends ConsumerState<HomePage>
           target: target,
           heightCm: heightCm,
           weightKg: weightKg,
+          stepsPerMinute: stepsPerMinute,
           unitSystem: unitSystem,
           sensorAvailable: sensorAvailable,
         ),
@@ -250,6 +259,7 @@ class _StepContent extends ConsumerWidget {
   final int target;
   final double? heightCm;
   final double? weightKg;
+  final double stepsPerMinute;
   final UnitSystem unitSystem;
 
   const _StepContent({
@@ -257,6 +267,7 @@ class _StepContent extends ConsumerWidget {
     required this.target,
     this.heightCm,
     this.weightKg,
+    required this.stepsPerMinute,
     required this.unitSystem,
   });
 
@@ -307,15 +318,22 @@ class _StepContent extends ConsumerWidget {
               MetricCard(
                 icon: Icons.local_fire_department,
                 label: 'Calories',
-                value: StepMetrics.calories(steps, weightKg: weightKg)
-                    .toStringAsFixed(0),
+                value: StepMetrics.calories(
+                  steps,
+                  weightKg: weightKg,
+                  heightCm: heightCm,
+                  stepsPerMinute: stepsPerMinute,
+                ).toStringAsFixed(0),
                 unit: 'kcal',
               ),
               const SizedBox(width: 12),
               MetricCard(
                 icon: Icons.timer_outlined,
                 label: 'Active time',
-                value: StepMetrics.activeMinutes(steps).toStringAsFixed(0),
+                value: StepMetrics.activeMinutes(
+                  steps,
+                  stepsPerMinute: stepsPerMinute,
+                ).toStringAsFixed(0),
                 unit: 'min',
               ),
             ],

@@ -104,6 +104,24 @@ class CalibrationFactorNotifier extends SettingNotifier<double> {
   Future<void> save(double value) => pedometer.setCorrectionFactor(value);
 }
 
+/// The user's measured walking cadence. Unlike the calibration factor this
+/// never leaves the app isolate — only the UI's metrics use it.
+final stepsPerMinuteProvider =
+    NotifierProvider<StepsPerMinuteNotifier, double>(
+  StepsPerMinuteNotifier.new,
+);
+
+class StepsPerMinuteNotifier extends SettingNotifier<double> {
+  @override
+  double get fallback => StepMetrics.defaultStepsPerMinute;
+
+  @override
+  Future<double> load(PreferencesService prefs) => prefs.getStepsPerMinute();
+
+  @override
+  Future<void> save(double value) => prefs.setStepsPerMinute(value);
+}
+
 final heightCmProvider = NotifierProvider<HeightCmNotifier, double?>(
   HeightCmNotifier.new,
 );

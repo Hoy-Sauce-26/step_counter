@@ -17,12 +17,17 @@ String dayOffset(int days) {
 }
 
 void main() {
-  setUpAll(sqfliteFfiInit);
+  setUpAll(() {
+    sqfliteFfiInit();
+    // Process-global, and only the first assignment does anything: sqflite
+    // prints a warning on every one after that. Hence setUpAll rather than
+    // beside the per-test reset below.
+    databaseFactory = databaseFactoryFfi;
+  });
 
   late DatabaseHelper db;
 
   setUp(() async {
-    databaseFactory = databaseFactoryFfi;
     DatabaseHelper.databasePathOverride = inMemoryDatabasePath;
     await DatabaseHelper.resetForTesting();
     db = DatabaseHelper.instance;

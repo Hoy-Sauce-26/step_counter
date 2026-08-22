@@ -26,16 +26,18 @@ estimates, history charts, saved routes, and sensor calibration.
 - **Saved routes**: name a walk, track it live, keep a running average.
   Cancel without recording a session, or log one to today after the fact.
 - **Personalization**: optional height and weight sharpen the estimates;
-  metric or imperial throughout.
-- **Calibration**: a 90–110% slider, plus a guided 100-step test that measures
-  the sensor's accuracy and suggests a correction factor.
+  metric or imperial throughout. Pace drives active time directly, and
+  calories through walking speed.
+- **Calibration**, two kinds: a 90–110% slider with a guided 100-step test for
+  the sensor's accuracy, and a steps-per-minute setting with a guided
+  60-second test for the walker's own pace.
 - **Auto-starts on boot**, once the app has been opened at least once.
 
 ## Getting started
 
 ```
 flutter pub get
-flutter test        # ~115 tests, no device or sensor needed
+flutter test        # ~130 tests, no device or sensor needed
 flutter analyze
 flutter run         # installs as "Roamfree Dev"
 ```
@@ -89,15 +91,17 @@ hit the file — so the app sees service writes as soon as they are flushed
 | `stepSensorAvailable` | service | app, at launch |
 | `activeRoute` | service (sole writer) | both |
 | `dailyTarget`, `stepCorrectionFactor` | app | service, at start-up |
-| `heightCm`, `weightKg`, `unitSystem` | app | app |
+| `heightCm`, `weightKg`, `unitSystem`, `stepsPerMinute` | app | app |
 | `routes`, `route_sessions` tables | app | app |
 
 Two consequences worth knowing before editing:
 
 - **A setting the app writes is invisible to a running service.** The target
   and correction factor are mirrored over `service_channel` for exactly this
-  reason. `StepAccumulator` deliberately has no storage access for the factor,
-  making a stale re-read impossible rather than merely discouraged.
+  reason, and `StepAccumulator` deliberately has no storage access for the
+  factor, making a stale re-read impossible rather than merely discouraged.
+  Cadence needs no channel: only `StepMetrics` reads it, and the service
+  isolate never calls into `StepMetrics`.
 - **The active route is written only by the service isolate.** The app keeps
   its own copy for the UI and must not persist it. Clearing is the exception —
   both sides may clear, because clearing is idempotent and can only ever end a
@@ -180,6 +184,27 @@ the buffer first, so a stored baseline can't outrun the total it anchors), and
 makes the restart invisible). `flush()` is called on `stopService`, because a
 timer that never fires is the one way buffered steps go missing for good.
 
+### Estimates
+
+`StepMetrics` turns a step count into distance, calories and active time.
+Two things there are easy to get wrong:
+
+- **Intensity is a function of speed, not cadence.** `metWalking` takes km/h,
+  and `speedKmh` derives that from cadence × stride — reusing `distanceKm`,
+  so the stride model exists in exactly one place. Mapping cadence straight to
+  a MET would call a tall, unhurried walker brisk and a short, hurrying one
+  slow; going through speed makes that impossible.
+- **Cost per step is U-shaped**, bottoming out around 100 spm and rising at
+  both ends. A slow shuffle really does cost more per step than a normal walk.
+  That is the published curve, not a bug, and there is a test pinning it
+  because it reads like one.
+
+MET anchors come from the Compendium of Physical Activities for level
+walking, discounted by `incidentalWalkingFactor` — those values describe
+sustained purposeful walking, and a day's step total is mostly corridors and
+kitchen trips. The discount is a separate named constant so the anchors stay
+checkable against the source.
+
 ## Service lifecycle
 
 - `initializeBackgroundService()` runs from `main()` and only *configures* the
@@ -235,7 +260,8 @@ lib/
 │   ├── notification_service.dart — the one notification, three faces
 │   ├── database_helper.dart      — sqflite: history, routes, sessions
 │   ├── preferences_service.dart  — settings, baseline, last raw reading
-│   ├── metrics.dart              — step → distance/calories/time
+│   ├── metrics.dart              — step → distance/calories/time;
+│   │                               intensity via speed, not cadence
 │   ├── formatting.dart           — dateKey (local, never UTC), durations
 │   └── providers.dart            — Riverpod wiring
 ├── screens/                      — home_page, routes_page
@@ -252,7 +278,8 @@ sqflite (step_counter.db, version 4)
   route_sessions(id PK, routeId, date, steps, durationSeconds)
 
 SharedPreferences
-  dailyTarget · stepCorrectionFactor · heightCm · weightKg · unitSystem
+  dailyTarget · stepCorrectionFactor · stepsPerMinute
+  heightCm · weightKg · unitSystem
   lastRawReading            "<raw>@<millisSinceEpoch>"
   baseline_<yyyy-MM-dd>     only the current day's is kept; writing one
                             drops every other
