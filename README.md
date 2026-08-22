@@ -11,13 +11,16 @@ estimates, history charts, saved routes, and sensor calibration.
   background service, the notification and the permission flow are all
   Android-specific.
 - **Stack:** Flutter · Riverpod 3 · sqflite · SharedPreferences ·
-  `flutter_background_service` · `pedometer` · `flutter_local_notifications`
+  `flutter_local_notifications` · `roameter` (this repo's own sensor plugin,
+  `packages/roameter`). The foreground service, the boot receiver and the
+  periodic sampler are hand-written Kotlin in `android/app`.
 
 ## What it does
 
 - **Live step tracking** from the hardware step sensor, in a background
   service — not only while the app is open.
-- **Persistent notification** with today's count, target and progress.
+- **Ongoing notification** with today's count, target and progress —
+  switchable off, without switching off the counting.
 - **Daily target** with a progress ring, editable from the app bar.
 - **Distance / calories / active time**, derived from step count (no GPS).
 - **7-day chart**, target-relative: bars colored by whether the day hit the
@@ -31,23 +34,30 @@ estimates, history charts, saved routes, and sensor calibration.
 - **Calibration**, two kinds: a 90–110% slider with a guided 100-step test for
   the sensor's accuracy, and a steps-per-minute setting with a guided
   60-second test for the walker's own pace.
-- **Auto-starts on boot**, once the app has been opened at least once.
+- **Recovers days it wasn't running for.** Totals are derived from a journal
+  of counter readings rather than accumulated live, so a service an OEM killed
+  on Tuesday still yields Tuesday's steps.
+- **Auto-starts on boot**, once the app has been opened at least once, unless
+  the ongoing notification has been turned off.
 
 ## Getting started
 
 ```
 flutter pub get
-flutter test        # ~130 tests, no device or sensor needed
+flutter test        # ~167 tests, no device or sensor needed
+(cd packages/roameter && flutter test)   # the sensor plugin's own tests
 flutter analyze
 flutter run         # installs as "Roamfree Dev"
 ```
 
-Step accounting runs against an in-memory `StepStore`; the database tests run
-sqflite on the host via `sqflite_common_ffi`, including both schema
-migrations — the only part of this codebase that can destroy history a user
-already has, and the only part that never runs during ordinary development.
+The fold that derives totals is a pure function over a list of readings, so
+days, reboots, hour boundaries and midnight all run in milliseconds with no
+device. The database tests run sqflite on the host via `sqflite_common_ffi`,
+including every schema migration — the only part of this codebase that can
+destroy history a user already has, and the only part that never runs during
+ordinary development.
 
-## Architecture: two isolates, one sensor
+## Architecture: two isolates, one counter
 
 Everything here follows from the app running in two Dart isolates that share
 no memory:
@@ -55,57 +65,68 @@ no memory:
 | | **App isolate** (`main.dart`) | **Service isolate** (`onServiceStart`) |
 | :--- | :--- | :--- |
 | Lives as long as | the UI is open | the foreground service does — across the app being backgrounded, killed, or never opened |
-| Owns | the UI, Riverpod, route CRUD | the step sensor, all counting, the notification |
-| Sensor access | none | `Pedometer.stepCountStream` |
+| Owns | the UI, Riverpod, route CRUD | the notification, and counting while nobody is looking |
+| Reads the sensor | only while on screen *and* no service is running | whenever it runs |
 
-> **Only one place may call `Pedometer.stepCountStream.listen()`, and that
-> place is `onServiceStart`.**
+> **Exactly one of the two counts at a time.**
 
-The plugin supports a single active native listener. A second `.listen()` —
-even briefly, even from the other isolate — can silently kill the first, and
-it presents as "steps just stop updating, no error." It has happened twice.
+Both write to the same journal, and two writers would fight over the same rows
+and double-count. `_ensureBackgroundServiceRunning` in `HomePage` is the one
+place that decides, and it stops one before starting the other.
 
-| Stream | Owner | Why |
+Which one is counting is a question about *liveness*, not correctness.
+`TYPE_STEP_COUNTER` is a cumulative hardware register that runs whether or not
+anything is listening, so a reading before a gap and a reading after it are
+enough to recover everything in between. That is what the journal is for, and
+why nothing here has to stay subscribed to be right.
+
+| Situation | What counts | What the user sees |
 | :--- | :--- | :--- |
-| `stepCountStream` | `background_service.dart`, in `onServiceStart` | Must survive the app being backgrounded, killed, or never opened. |
-| `pedestrianStatusStream` | `PedometerService`, app isolate | Different native channel, so no conflict. Nothing reads its output — it is subscribed purely because dropping it made step readings arrive in laggy batches. |
+| Notification on | the service | a live count, app open or not |
+| Notification off, app open | the app isolate | a live count while they watch |
+| Notification off, app away | the native sampler, every 15 min | totals catch up on the next open |
 
-The app never touches the step sensor. `PedometerService` is a bridge: it
-relays the service's broadcasts as ordinary Dart streams and sends commands
-back.
+The app isolate drops its subscription the moment it leaves the screen. That
+subscription is only worth its power draw while somebody is looking at the
+number it produces.
 
 ## What owns what
 
 **SharedPreferences is loaded into memory per isolate at first use.** Each
-isolate sees its own writes immediately and the other's not at all. Persisted
-state therefore crosses the boundary *only at start-up*, when each side reads
-it once; everything live crosses over `service_channel` instead. sqflite is
-the same story with a separate connection per isolate, except that reads do
-hit the file — so the app sees service writes as soon as they are flushed
-(within `ThrottledStepStore.flushInterval`, 10s).
+isolate sees its own writes immediately and the other's not at all. Live state
+crosses over `service_channel` for exactly this reason; the few reads that
+genuinely need the other side's writes call `PreferencesService.reload()`
+first, which drops the cached snapshot. sqflite is the same story with a
+separate connection per isolate, except that reads do hit the file.
 
 | State | Written by | Read by |
 | :--- | :--- | :--- |
-| `daily_steps`, `hourly_steps` tables | service | app (charts, seed value) |
-| `baseline_<date>`, `manualSteps_<date>`, `lastRawReading` | service | service |
-| `stepSensorAvailable` | service | app, at launch |
+| `step_journal` table | whichever isolate is counting, and the native sampler | both |
+| `daily_steps`, `hourly_steps` tables | derived from the journal by `StepProjection` | app (charts, seed value) |
+| `manual_steps` table | service, on an `addManualSteps` command | both |
 | `activeRoute` | service (sole writer) | both |
+| `stepSensorAvailable` | service | app, at launch |
+| `serviceHeartbeat` | service, on a timer | app, to tell a live service from a deaf one |
+| `foregroundTrackingEnabled` | app | app, and Kotlin on boot |
 | `dailyTarget`, `stepCorrectionFactor` | app | service, at start-up |
 | `heightCm`, `weightKg`, `unitSystem`, `stepsPerMinute` | app | app |
 | `routes`, `route_sessions` tables | app | app |
 
-Two consequences worth knowing before editing:
+Three consequences worth knowing before editing:
 
 - **A setting the app writes is invisible to a running service.** The target
   and correction factor are mirrored over `service_channel` for exactly this
-  reason, and `StepAccumulator` deliberately has no storage access for the
-  factor, making a stale re-read impossible rather than merely discouraged.
-  Cadence needs no channel: only `StepMetrics` reads it, and the service
-  isolate never calls into `StepMetrics`.
+  reason. Cadence needs no channel: only `StepMetrics` reads it, and the
+  service isolate never calls into `StepMetrics`.
 - **The active route is written only by the service isolate.** The app keeps
   its own copy for the UI and must not persist it. Clearing is the exception —
   both sides may clear, because clearing is idempotent and can only ever end a
   route.
+- **`foregroundTrackingEnabled` is read from Kotlin as well as Dart.**
+  `BootReceiver` has to know whether the user wants the service before any
+  Dart has run, so `TrackingPreference` reads Flutter's own preferences file
+  directly. Without that, a reboot switched tracking back on behind the back
+  of anyone who had turned it off.
 
 ## Crossing the boundary: `service_channel.dart`
 
@@ -127,8 +148,17 @@ stops working.
 | `routeUpdate` | service → app | `int` | live route step count |
 | `sensorStatus` | service → app | `bool` | whether this device has a step counter |
 
-`setAsForeground`, `setAsBackground` and `stopService` are the plugin's own
-built-in names and are still handled as raw strings in `onServiceStart`.
+`stopService` is handled as a raw string in `onServiceStart`; there is no
+foreground/background toggle any more, because this service is only ever
+foreground.
+
+The transport underneath changed in the move off `flutter_background_service`
+and `service_channel.dart` did not: both sides still `invoke` and `on`, but a
+`TrackingService`/`TrackingServiceInstance` pair now carries the messages over
+two method channels that `ServiceBridge.kt` routes between. A message with no
+live counterpart is dropped rather than queued — if the app is not running
+there is nobody to receive a report, and if the service is not running a
+command has nothing to act on.
 
 **To add a message:** declare it in `service_channel.dart`, then `.handle(...)`
 it in `onServiceStart`'s start-up half — above the sensor listener, so it is
@@ -137,62 +167,69 @@ registered before the first reading can arrive — or `.listen(...)` it in
 channel name to `_mirroredSettings` in
 `test/background_service_invariants_test.dart`.
 
-## Counting: `StepAccumulator`
+## Counting: the journal
 
-`StepAccumulator` turns raw readings into daily and hourly totals, reaching
-storage only through the `StepStore` interface — which a test satisfies with
-four maps, so a day, a reboot and an hour boundary run in milliseconds. Nearly
-every counting bug this project has had lived in that logic while it was
-inline in `onServiceStart` and unreachable from a test.
+`TYPE_STEP_COUNTER` is a cumulative register that counts whether or not
+anything is listening. Totals are therefore *derived from readings* rather
+than accumulated live: `step_journal` holds `(raw, timestamp)` rows, and
+`foldJournal` differences adjacent pairs into daily and hourly totals.
+
+That one decision is what fixes a day the service never ran. The steps were
+never lost — only unrecorded — so a reading on either side of a gap recovers
+everything inside it.
 
 Four things are load-bearing:
 
-- **The day's total is derived, not accumulated** — recomputed each reading as
-  `(raw − baseline) × correctionFactor`. That is why a lost write is harmless,
-  and why `ThrottledStepStore` can buffer writes at all.
-- **A counter reset is detected against the previous reading, not the
-  baseline.** The baseline goes negative after the first reboot of a day, and
-  nothing falls below a negative number — comparing against it misses a second
-  reboot and reverts the day. The previous reading is persisted on every
-  reading and never buffered.
-- **A new day is anchored at the previous reading, not at the one that opens
-  it.** The sensor counts while the CPU sleeps and hands over the whole batch
-  when it wakes, so the first reading of a day routinely arrives *after* the
-  walk that produced it and carries all of it. Anchoring the day at that
-  reading makes the walk the day's zero — which is how a night with the app
-  closed plus a morning walk came to count nothing at all. Past
-  `StepAccumulator.maxCarryOverGap` (18h) the batch is dropped instead: that
-  gap means a service down for a day or more, and there is no telling which
-  day its steps belong to.
-- **The reading and its arrival time are one stored value, under one key.** A
-  count whose age is unknown can't be carried over, so the pair is useless
-  split — and two keys let a process die between them. `LastRawReading`
-  encodes as `<raw>@<millis>`; `getLastRawReading` falls back to the older
-  single-int key so an upgrade doesn't lose the reading and miss the next
-  reboot.
+- **Steps are attributed to an interval's start.** They happened somewhere
+  inside it and nothing says where, so the choice is between biasing early and
+  biasing late. Early is right because a reading is taken at midnight: the
+  interval *ending* at 00:00 belongs to the day that just finished, and the one
+  *starting* there to the new day. Day boundaries come out exact, and within a
+  day the error is bounded by the sampling interval rather than by how long the
+  device slept.
 
-### Write buffering
+- **A falling raw count means a reboot — and that reading is only sound while
+  entries are in order.** Two readings of one counter can disagree about which
+  is larger only if they disagree about which came first. Since readings may
+  carry sensor event times *older than the moment they arrive*,
+  `StepProjection` enforces strictly increasing timestamps, filing a late
+  arrival just after the newest entry rather than before it. Without that, one
+  late arrival looks exactly like a reboot and credits a whole counter's worth
+  of steps.
 
-`ThrottledStepStore` wraps the real store and holds daily/hourly rows back for
-`flushInterval` (10s), collapsing a walk's worth of updates into one row each.
-Reads see buffered values, so the app never reads behind the buffer by more
-than that interval.
+- **Readings are journalled at the sensor's own event time where possible.**
+  A reading buffered through a device sleep stands for the moment the counter
+  reached it, which is when the walking happened — not the moment the phone
+  woke up and delivered it. Falling back to arrival time when the event time is
+  in the future or out of order.
 
-Not buffered, and not to be: **baselines** and **manual credits** (both flush
-the buffer first, so a stored baseline can't outrun the total it anchors), and
-**the last raw reading** (a stale value sitting below a post-reboot reading
-makes the restart invisible). `flush()` is called on `stopService`, because a
-timer that never fires is the one way buffered steps go missing for good.
+- **The display does not wait for a journal write.** Journalling every reading
+  would be thousands of rows a day for nothing. `LiveStepCounter` writes every
+  five minutes, on the hour, and on the date turning; in between, the shown
+  figure is the last derived total plus the steps taken since the last write.
+  A database peek showing less than the screen is that, not a bug.
 
-The last raw reading is skipped, though, when the reading repeats the previous
-one. Some OEM sensor stacks re-report the same cumulative count instead of
-reporting only changes, and on Android `SharedPreferences.setString` goes
-through `LegacySharedPreferencesPlugin`, which uses `commit()` — a blocking,
-fsync'd rewrite of the whole XML file. Skipping is safe rather than merely
-cheap: only the stored timestamp goes stale, and a carried-over reading equal
-to the current one contributes a zero delta whether it is carried or dropped,
-so no total downstream can tell the difference. The active route's row is
-skipped on the same terms, comparing every field it would persist.
+Manual credits live in their own table and are added on top of the fold rather
+than into it: nobody walked them, so they belong to a day's total and to no
+hour. They moved out of preferences precisely because re-deriving an older day
+has to be able to give them back.
+
+### Upgrading an install that has no journal
+
+Derived totals replace stored ones, so a journal that starts mid-morning would
+otherwise shrink today to whatever it happens to cover — an install upgrading
+into this would watch its step count collapse.
+
+`backfillFromStoredTotal` works *backwards* instead: the stored total says how
+many steps today holds and the counter says where it is now, so the difference
+is the reading today opened at. Writing that at midnight makes the fold
+reproduce the day it is replacing. It runs once, against an empty journal.
+
+### Journal retention
+
+The journal is a rolling buffer, not the archive. `StepProjection` re-derives
+the last 14 days and prunes readings older than 30; the totals those readings
+were folded into outlive them in `daily_steps`.
 
 ### Notification throttling
 
@@ -205,8 +242,9 @@ The first update in a quiet period goes out immediately, which is what keeps
 the notification feeling live. The trailing send is the load-bearing part: the
 most recent update to arrive during a window is sent when the window ends, so
 the last reading of a walk always lands and the notification can never settle
-showing a stale total. `flush()` is called on `stopService` for the same
-reason `ThrottledStepStore.flush()` is.
+showing a stale total. `flush()` is called on `stopService`, because a timer
+that never fires is the one way a held update goes missing for good — the same
+reason the journal is flushed there.
 
 Route and daily updates share the throttle deliberately — they target the same
 notification id, so last writer wins either way.
@@ -234,25 +272,84 @@ checkable against the source.
 
 ## Service lifecycle
 
-- `initializeBackgroundService()` runs from `main()` and only *configures* the
-  service: `autoStart: false`, `autoStartOnBoot: true`, foreground mode,
-  service type `health`.
-- The app starts it — `_ensureBackgroundServiceRunning()` in `HomePage`, after
-  permission is granted and again on every `resumed` lifecycle event, so an
-  OEM battery manager that killed the service doesn't leave tracking silently
-  off. A failure raises a retry banner above the counts rather than replacing
-  them: the stored total is still real, it just isn't advancing.
-- On resume the app also calls `refreshForCurrentDate()`, so a date rollover
-  while the app was away can't leave yesterday's total on screen.
-- Notification id `888` and channel id `step_counter_channel` are shared by
-  the foreground-service notification and every update the service pushes —
-  daily total, route progress, sensor-unavailable. That shared id is what lets
-  the service rewrite the FGS notification in place. **Don't change the
-  channel id**; it would orphan the notification settings of every install.
-- A single midnight `Timer` resets the notification to `0/target` and
+`StepTrackingService` is this repo's own Kotlin foreground service, and the
+things it does *not* do matter as much as the things it does.
+
+- **It holds no wakelock.** A foreground service keeps the process from being
+  reclaimed; it does not, and should not, keep the CPU awake. The counter runs
+  through suspend and delivers what it buffered on the next wake, so nothing is
+  lost by letting the application processor sleep — only the notification lags
+  until it does. The plugin this replaced acquired a `PARTIAL_WAKE_LOCK` with
+  no timeout and never released it; `dumpsys power` showed it held for fifteen
+  hours straight. `WAKE_LOCK` is no longer in the merged manifest at all, so
+  the app cannot hold one by accident.
+
+- **It returns `START_STICKY`.** Android restarts a sticky service it had to
+  kill, with no exact alarms and no polling. The plugin this replaced used
+  `START_NOT_STICKY` plus an alarm-driven watchdog that armed once, five
+  seconds after start, and never re-armed — so once the service had been up for
+  five seconds there was no recovery mechanism at all.
+
+- **The restart arrives with a null Intent,** which is why the Dart entrypoint
+  handle is persisted (`TrackingCallback`) rather than passed in. On that cold
+  restart the service is the first thing in the process, so
+  `FlutterLoader.ensureInitializationComplete` has to run *before*
+  `FlutterCallbackInformation.lookupCallbackInformation` — the lookup is a
+  native call, and nothing has loaded `libflutter` yet. Starting from the
+  activity happens to work either way, which makes this the failure mode you
+  only see once the service has to come up on its own. It is also exactly what
+  a reboot does.
+
+- **The isolate needs `WidgetsFlutterBinding.ensureInitialized()`.** It is
+  entered directly from Kotlin, so nothing has set up the binding the way a
+  normal launch would, and every platform channel below it — notifications,
+  preferences, sqflite, the sensor — needs it first.
+
+- **Notification id `888` and channel id `step_counter_channel`** are shared by
+  the foreground-service notification and every update the service pushes. The
+  channel is created in Kotlin as well as Dart, because the service can start
+  on boot before any Dart runs. **Don't change the channel id**; it would
+  orphan the notification settings of every install.
+
+- **A single midnight `Timer`** resets the notification to `0/target` and
   reschedules itself, rather than polling. It is skipped while a route is
-  active so it can't stomp the route notification, and it touches no counting
-  state — that resolves on the first real reading regardless.
+  active so it can't stomp the route notification.
+
+### Sampling
+
+`StepSampler` takes a reading every fifteen minutes — or at midnight, whichever
+comes first — whether or not anything else is running. It is the safety net
+under the whole design: without it, a reboot while the notification is off
+loses everything since the app was last opened, because the counter zeroes and
+there is no reading on the far side of it.
+
+Deliberately native. Spinning a Flutter engine for a two-column insert would
+cost more than the sample it is taking, so `JournalWriter` opens the database
+without an `SQLiteOpenHelper` — a helper would carry its own version number and
+try to "upgrade" a schema sqflite owns — and inserts into a table Dart has
+already created. Those two columns are the whole Kotlin/Dart contract.
+
+The alarm is inexact (`setAndAllowWhileIdle`). An exact one needs
+`SCHEDULE_EXACT_ALARM`, a restricted Play Console permission, and the inexact
+version still fires through Doze. A sample landing a few minutes late costs a
+little attribution accuracy and never loses a step.
+
+### Deciding who runs
+
+`_ensureBackgroundServiceRunning()` in `HomePage` runs after permission is
+granted and on every `resumed` event. It reads `foregroundTrackingEnabled`
+first and either starts the service (stopping local counting) or starts local
+counting (stopping the service).
+
+`isRunning()` only reports that an Android service object exists. It says
+nothing about whether the isolate inside it is alive or whether a reading has
+arrived since, so a service that is running is additionally checked against
+`serviceHeartbeat`: silence past `serviceHeartbeatTimeout` (45 minutes, three
+missed beats) means stop-then-start, because `start()` on a service the
+platform still considers alive is a no-op. A heartbeat rather than the last
+reading's timestamp, because somebody asleep for eight hours produces no
+readings either, and restarting the service every morning on that evidence is
+pure churn.
 
 ## The UI side
 
@@ -261,10 +358,11 @@ provider; everything else hangs off it.
 
 | Provider | What it gives |
 | :--- | :--- |
-| `todayStepsProvider` | live daily total, seeded from the DB then fed by `stepUpdate` |
+| `todayStepsProvider` | live daily total, seeded from the DB then fed by `stepUpdate` — or, with no service running, by the app's own `LiveStepCounter` |
 | `stepSensorAvailableProvider` | replays its last value to late subscribers — the report is a single event, and a subscriber created afterwards would otherwise wait forever on hardware without a sensor |
-| `walkingStatusProvider` | no UI consumer; keep it subscribed (see the stream table above) |
+| `foregroundTrackingProvider` | whether the ongoing notification runs; acts on the setting rather than only storing it, so the notification appears or disappears as the switch moves |
 | `dailyTargetProvider`, `calibrationFactorProvider`, `heightCmProvider`, `weightKgProvider`, `unitSystemProvider` | settings, via the shared `SettingNotifier` base — synchronous fallback first, hydrated from prefs, saved through the service where it must be mirrored |
+| `systemSettingsProvider` | the battery and notification-channel screens the app can only point at |
 | `past7DaysProvider`, `hourlyStepsForDateProvider` | chart data, zero-filled for missing days/hours |
 | `activeRouteProvider`, `activeRouteStepsProvider` | the route in progress; keyed by start time so a new session gets a genuinely fresh subscription |
 
@@ -276,44 +374,72 @@ steps rather than every step.
 ```
 lib/
 ├── main.dart                     — entry point; init order matters
-├── models/                       — daily_steps, hourly_steps, saved_route
+├── models/                       — daily_steps, hourly_steps, saved_route,
+│                                   step_journal_entry
 ├── services/
-│   ├── background_service.dart   — service isolate: sole sensor listener,
-│   │                               route bookkeeping, foreground config
-│   ├── step_accumulator.dart     — the counting: StepAccumulator, StepStore,
-│   │                               ThrottledStepStore, PersistentStepStore
+│   ├── background_service.dart   — service isolate: sensor listener, route
+│   │                               bookkeeping, heartbeat, liveness helpers
+│   ├── step_journal.dart         — foldJournal: readings → totals, pure
+│   ├── step_projection.dart      — journal → stored totals; ordering,
+│   │                               manual credits, upgrade backfill
+│   ├── live_step_counter.dart    — keeps the display exact between writes
+│   ├── step_sync.dart            — one reading, no service, on resume
+│   ├── tracking_service.dart     — app ↔ service transport
 │   ├── service_channel.dart      — every cross-isolate message, typed
-│   ├── pedometer_service.dart    — app-isolate bridge to the service
+│   ├── pedometer_service.dart    — app-isolate bridge; also counts locally
+│   │                               when no service is running
+│   ├── system_settings.dart      — battery + notification-channel intents
 │   ├── notification_service.dart — the one notification, three faces
-│   ├── database_helper.dart      — sqflite: history, routes, sessions
-│   ├── preferences_service.dart  — settings, baseline, last raw reading
+│   ├── database_helper.dart      — sqflite: journal, history, routes
+│   ├── preferences_service.dart  — settings, heartbeat, legacy cleanup
 │   ├── metrics.dart              — step → distance/calories/time;
 │   │                               intensity via speed, not cadence
 │   ├── formatting.dart           — dateKey (local, never UTC), durations
 │   └── providers.dart            — Riverpod wiring
-├── screens/                      — home_page, routes_page
+├── screens/                      — home_page, routes_page, settings_page
 └── widgets/                      — ring, cards, dialogs, charts/
+
+packages/roameter/                — the sensor plugin: batching control,
+                                    real event timestamps, one-shot reads
+
+android/app/src/main/kotlin/com/nttech/roamfree/
+├── StepTrackingService.kt        — the foreground service; no wakelock
+├── StepSampler.kt                — the 15-minute / midnight alarm
+├── JournalWriter.kt              — native insert into step_journal
+├── ServiceBridge.kt              — routes messages between the isolates
+├── BootReceiver.kt               — boot and package-replaced
+├── TrackingCallback.kt           — the persisted Dart entrypoint handle
+├── TrackingPreference.kt         — the notification setting, from Kotlin
+└── MainActivity.kt               — system-settings and service channels
 ```
 
 ### Storage layout
 
 ```
-sqflite (step_counter.db, version 4)
-  daily_steps(date PK, stepCount)
+sqflite (step_counter.db, version 7)
+  step_journal(recordedAt PK, rawSteps)      readings; a rolling 30 days
+  daily_steps(date PK, stepCount)            derived from the journal
   hourly_steps(date, hour, stepCount, PK(date, hour))
+  manual_steps(date PK, stepCount)           credits that never came from
+                                             the sensor
   routes(id PK, name, createdAt)
   route_sessions(id PK, routeId, date, steps, durationSeconds)
 
 SharedPreferences
   dailyTarget · stepCorrectionFactor · stepsPerMinute
   heightCm · weightKg · unitSystem
-  lastRawReading            "<raw>@<millisSinceEpoch>"
-  baseline_<yyyy-MM-dd>     only the current day's is kept; writing one
-                            drops every other
-  manualSteps_<yyyy-MM-dd>  credits that never came from the sensor
+  foregroundTrackingEnabled   also read from Kotlin, on boot
+  serviceHeartbeat            proof of life, written on a timer
+  batteryPromptDismissed
   stepSensorAvailable · activeRoute (JSON blob, so it reads and clears
                                      atomically)
 ```
+
+Baselines and `lastRawReading` are gone — the journal records raw readings
+now, so nothing needs to remember one separately.
+`PreferencesService.removeSupersededKeys()` clears what earlier versions left
+behind; preferences load whole on first access, so orphans are paid for on
+every launch until they go.
 
 Dates are `yyyy-MM-dd` **local** time (`dateKey`), never UTC, and sort
 chronologically as plain strings so SQL `BETWEEN`/`ORDER BY` work directly.
@@ -322,22 +448,33 @@ chronologically as plain strings so SQL `BETWEEN`/`ORDER BY` work directly.
 
 | File | Covers |
 | :--- | :--- |
-| `step_accumulator_test.dart` | the counting: days, reboots, hour boundaries, batches across midnight, manual credits, recalibration |
-| `baseline_test.dart` | `resolveBaselineValue` in isolation |
-| `throttled_step_store_test.dart` | buffering, flush ordering, and that throttling changes *when* rows are written and nothing else |
-| `preferences_service_test.dart` | the `lastRawReading` round-trip and the once-per-install upgrade read |
-| `database_helper_test.dart` | queries, concurrent opens, and both schema migrations |
+| `step_journal_test.dart` | `foldJournal` in isolation: gaps, reboots, midnight, out-of-order entries, correction factors |
+| `step_projection_test.dart` | journal → stored totals, manual credits, retention, the upgrade backfill, and the ordering that keeps the reboot rule sound |
+| `live_step_counter_test.dart` | journal cadence, the live figure between writes, and event-time attribution |
+| `local_counting_test.dart` | that a reading reaches the display with **no service running** |
+| `step_sync_test.dart` | the one-shot resume sample and its throttle |
+| `preferences_service_test.dart` | heartbeat round-trip, manual-credit pruning, superseded-key cleanup |
+| `database_helper_test.dart` | queries, concurrent opens, and every schema migration |
 | `route_progress_test.dart` | `resolveRouteProgress` across reboots and segments |
 | `metrics_test.dart` | distance/calorie/time formulas, personalized and flat-rate |
+| `notification_throttle_test.dart` | leading edge, coalescing, and the trailing send |
 | `sensor_available_stream_test.dart` | that the sensor report replays to late subscribers |
+| `settings_page_test.dart` | the battery section's three states, and that the notification row offers a real switch |
 | `background_service_invariants_test.dart` | **a source-reading guard, not a unit test** |
+| `packages/roameter/test/` | reading payloads, one-shot reads, and that `batchLatency` is passed through |
 
-That last one parses `background_service.dart` as text, because the rule it
-protects can't be observed from inside a single isolate: mirrored settings
-must be read exactly once, at start-up, *above* the sensor listener. A read
-below it would return the start-up snapshot and silently revert anything the
-app mirrored in since. If you move the listener, the test tells you to update
-its `_startupBoundary` constant.
+That second-to-last one parses `background_service.dart` as text, because the
+rule it protects can't be observed from inside a single isolate: mirrored
+settings must be read exactly once, at start-up, *above* the sensor listener. A
+read below it would return the start-up snapshot and silently revert anything
+the app mirrored in since. If you move the listener, the test tells you to
+update its `_startupBoundary` constant — which is exactly what it did during
+the move off `pedometer`.
+
+`local_counting_test.dart` exists because of a real regression: turning the
+notification off left the displayed count frozen, moving only when a resume
+happened to re-read the database — always one resume behind. Nothing was
+pushing totals to the UI at all.
 
 ## Android configuration
 
@@ -351,24 +488,38 @@ In `android/app/src/main/AndroidManifest.xml`:
 <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 ```
 
-And inside `<application>`, an override on the plugin's own service
-declaration — Android 14+ requires an explicit foreground service type
-(`tools:replace` needs `xmlns:tools` on the root `<manifest>` tag):
+Notably **not** `WAKE_LOCK`. It was only ever there because a plugin declared
+it, and its absence is what makes it impossible to reintroduce the drain by
+accident.
+
+And inside `<application>`, the service and its two receivers:
 
 ```xml
 <service
-    android:name="id.flutter.flutter_background_service.BackgroundService"
+    android:name=".StepTrackingService"
     android:foregroundServiceType="health"
-    tools:replace="android:exported" />
+    android:exported="false"
+    android:stopWithTask="false" />
+
+<receiver android:name=".StepSampleReceiver" android:exported="false" />
+<receiver android:name=".BootReceiver" android:exported="false">
+    <intent-filter>
+        <action android:name="android.intent.action.BOOT_COMPLETED" />
+        <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+    </intent-filter>
+</receiver>
 ```
 
-**The type must be `health`.** Android refuses to start a `dataSync` foreground
-service from `BOOT_COMPLETED`, and throws rather than declining: the service
-dies in `onCreate` before Flutter starts, the plugin's watchdog restarts it
-into the same wall, and the OS shows "Roamfree keeps stopping" with nothing in
-logcat. It only fires on boot-initiated starts, so opening the app by hand
-always looks fine. The same type is set in `AndroidConfiguration` so the two
-can't drift apart.
+`stopWithTask="false"` keeps tracking alive when the app is swiped out of
+recents. Both receivers are `exported="false"`, which also means a shell
+`am broadcast` cannot reach them — worth knowing before concluding the sampler
+is broken.
+
+**The service type must be `health`.** Android refuses to start a `dataSync`
+foreground service from `BOOT_COMPLETED`, and throws rather than declining: the
+service dies in `onCreate` before Flutter starts, and the OS shows "Roamfree
+keeps stopping" with nothing in logcat. It only fires on boot-initiated starts,
+so opening the app by hand always looks fine.
 
 **App icon:** `dart run flutter_launcher_icons`, configured in `pubspec.yaml`.
 The adaptive foreground/background split is deliberate — a flat square logo
@@ -403,50 +554,47 @@ repo.
 ## Known limitations
 
 - **iOS is unbuilt and untested.**
+
 - **First launch needs the app opened by hand once.** Android holds
   freshly-installed apps in a "stopped" state that blocks the boot-completed
   broadcast until then. Auto-start works normally on later reboots.
+
+- **A force-stop stops everything until the app is opened again.** Android
+  cancels the sampler's alarm and blocks the boot broadcast for an app in the
+  stopped state, so nothing records until somebody launches it. The fold
+  recovers the gap on that launch — unless the device rebooted inside it, in
+  which case the counter zeroed and the pre-reboot part is unrecoverable.
+
+- **Screen-off steps reach the display late.** The sensor buffers readings
+  while the CPU sleeps and hands the batch over on the next wake, so the
+  notification lags. They are counted in full, and since readings are journalled
+  at their own event times they are attributed to the hours they actually
+  happened in — the lag is in the display, not in the totals.
+
+- **An unclean reboot loses steps since the last journal write.** The counter
+  zeroes and there is no reading on the far side of the restart. Bounded by the
+  journal cadence: up to five minutes with the service running, up to fifteen
+  with only the sampler. Tune `LiveStepCounter.interval` and
+  `StepSampler.INTERVAL_MS` to trade writes for precision.
+
+- **A gap with no reading inside it lands on the day it began.** Steps are
+  attributed to an interval's start, so a stretch the sampler slept through
+  entirely credits the earlier day. Nothing is lost, but a long outage can
+  weight one day over its neighbour. The midnight reading is what keeps this
+  from crossing a date boundary in ordinary use.
+
 - **Some OEM battery managers** (Xiaomi, Huawei, Oppo, Vivo, Samsung, OnePlus)
-  kill background services more aggressively than stock Android. A tester
-  reporting steps that stop overnight, with everything here configured
-  correctly, is more likely hitting a battery whitelist than a bug.
-- **Screen-off steps arrive in batches**, because the sensor buffers readings
-  while the CPU sleeps. They are counted in full — the reading that delivers a
-  batch carries all of it — but the display and notification lag until it
-  lands. A batch spanning midnight counts entirely toward the day it is
-  delivered on, and a batch more than 18h stale is dropped rather than
-  misattributed, so a late-night walk the device slept through can land on the
-  following morning.
+  kill background services more aggressively than stock Android. Much less
+  likely to bite than it was — those managers target apps that hold permanent
+  wakelocks, which this no longer does — but the Settings screen offers the
+  battery-optimization exemption for the ones that still do.
 
-  This is a limitation of the plugin, not of the platform. Each batched
-  `SensorEvent` carries its own `timestamp`, but `pedometer`'s
-  `SensorEventListenerFactory` forwards `event.values[0]` and nothing else,
-  and `StepCount._()` then stamps the reading with `DateTime.now()` on
-  arrival. Recovering the real event times would let a batch be split across
-  the hours and days it actually spans.
+- **Health Connect is not read.** It would only add history from before
+  Roamfree was installed, or a reboot during a force-stopped stretch, and it
+  holds step data only if some *other* app writes it. Judged not worth the
+  dependency, the health-data permissions and the Play Console declaration
+  once the journal covered ordinary gaps.
 
-- **A day the service never ran counts zero, permanently.** Totals are derived
-  per reading, and nothing journals `(raw, timestamp)` pairs over time, so a
-  service killed on Tuesday and restarted on Friday has no way to attribute
-  the intervening delta — `maxCarryOverGap` discards it rather than guessing.
-  The steps themselves are not lost by the hardware: `TYPE_STEP_COUNTER` keeps
-  counting whether or not anyone is listening, so the information needed to
-  reconstruct those days is still in the counter until the next reboot.
-
-- **The live per-step counter is a side effect of an unused listener.**
-  Nothing consumes `walkingStatusStream`, but its `TYPE_STEP_DETECTOR`
-  subscription — registered by the plugin at `SENSOR_DELAY_FASTEST` with no
-  batch latency — is what holds the sensor pipeline open and makes
-  `TYPE_STEP_COUNTER` deliver per step instead of in batches. Removing it
-  makes the counter laggy. `PedometerService.setForegroundSensing` scopes it
-  to the foreground so the app stops paying for it while backgrounded, but the
-  mechanism is still incidental rather than chosen.
-- **An unclean reboot can lose up to ten seconds of steps.** Database writes
-  are buffered and flushed on a timer; an ordinary kill costs nothing, since
-  the next reading recomputes the total from the baseline, but a reboot
-  re-derives the baseline *from* the stored total. Tune `flushInterval` in
-  `ThrottledStepStore` to trade writes for precision.
-- **A sensor error before the first reading is latched.** `recordSensorStatus`
-  records the first outcome only, so a transient error at start-up persists
-  `stepSensorAvailable: false` and shows the "no step sensor" screen until
-  something overwrites it.
+- **`roameter` is not published.** It lives at `packages/roameter` as a path
+  dependency. The boundary is real, so publishing later is cheap; the API has
+  not been stable long enough to be worth anyone else depending on.
