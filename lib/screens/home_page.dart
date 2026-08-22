@@ -48,6 +48,10 @@ class _HomePageState extends ConsumerState<HomePage>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
+      // The live per-step counter costs a sensor subscription to run — see
+      // PedometerService._applyForegroundSensing. Worth it on screen.
+      ref.read(pedometerServiceProvider).setForegroundSensing(true);
+
       // Re-sync on resume, so a date rollover while the app was closed
       // doesn't leave yesterday's total on screen until the next step.
       ref.read(pedometerServiceProvider).refreshForCurrentDate();
@@ -58,6 +62,14 @@ class _HomePageState extends ConsumerState<HomePage>
       // Restart the background service if something killed it (OEM
       // battery manager, etc.) instead of tracking staying off silently.
       _ensureBackgroundServiceRunning();
+    }
+
+    // Only paused/detached, never inactive: inactive fires for a pulled-down
+    // notification shade and for the app switcher, and tearing the
+    // subscription down and back up for those would cost more than it saves.
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      ref.read(pedometerServiceProvider).setForegroundSensing(false);
     }
   }
 

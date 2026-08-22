@@ -6,6 +6,7 @@ import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:pedometer/pedometer.dart';
 import 'formatting.dart';
 import 'notification_service.dart';
+import 'notification_throttle.dart';
 import 'preferences_service.dart';
 import 'service_channel.dart' as channel;
 import 'step_accumulator.dart';
@@ -42,6 +43,12 @@ void onServiceStart(ServiceInstance service) async {
   // Buffered rather than written straight through:
   final stepStore = ThrottledStepStore(PersistentStepStore());
 
+  // Same idea for the notification: a rewrite per step is invisible to the
+  // reader and expensive to the system. Every update below goes through this,
+  // including the immediate ones — they stay immediate unless a step landed
+  // in the last second, and the trailing send covers them if one did.
+  final notifications = NotificationThrottle();
+
   if (service is AndroidServiceInstance) {
     service.on('setAsForeground').listen((event) {
       service.setAsForegroundService();
@@ -51,8 +58,9 @@ void onServiceStart(ServiceInstance service) async {
     });
   }
   service.on('stopService').listen((event) async {
-    // Commit before going away: the flush timer will not get another chance.
+    // Commit before going away: neither flush timer gets another chance.
     await stepStore.flush();
+    await notifications.flush();
     service.stopSelf();
   });
 
@@ -116,12 +124,12 @@ void onServiceStart(ServiceInstance service) async {
   channel.stopRoute.handle(service, () async {
     activeRoute = null;
     await prefsService.clearActiveRoute();
-    // Revert the notification immediately rather than waiting for the
-    // next step event.
-    await NotificationService.updateStepNotification(
-      steps: accumulator.lastDisplaySteps ?? 0,
-      target: dailyTarget,
-    );
+    // Revert the notification without waiting for the next step event.
+    final steps = accumulator.lastDisplaySteps ?? 0;
+    notifications.run(() => NotificationService.updateStepNotification(
+          steps: steps,
+          target: dailyTarget,
+        ));
   });
 
   channel.addManualSteps.handle(service, (amount) async {
@@ -131,10 +139,10 @@ void onServiceStart(ServiceInstance service) async {
 
     // Push an update rather than waiting for the next real reading.
     if (activeRoute == null) {
-      await NotificationService.updateStepNotification(
-        steps: newTotal,
-        target: dailyTarget,
-      );
+      notifications.run(() => NotificationService.updateStepNotification(
+            steps: newTotal,
+            target: dailyTarget,
+          ));
     }
     channel.stepUpdate.send(
       service,
@@ -162,6 +170,7 @@ void onServiceStart(ServiceInstance service) async {
 
   Pedometer.stepCountStream.listen((event) async {
     final now = DateTime.now();
+    final rawChanged = lastKnownRawSteps != event.steps;
     lastKnownRawSteps = event.steps;
     await recordSensorStatus(true);
 
@@ -184,30 +193,42 @@ void onServiceStart(ServiceInstance service) async {
       );
       final routeSteps = progress.steps;
 
+      // Compared before the assignments below overwrite them. A reading that
+      // moves nothing rewrites the whole prefs file for an identical value —
+      // and SharedPreferences.setString is a blocking, fsync'd commit.
+      final routeStateChanged = progress.rawBaseline != route['rawBaseline'] ||
+          progress.stepsBefore != route['stepsBefore'] ||
+          routeSteps != route['steps'] ||
+          progress.lastRaw != route['lastRaw'];
+
       route['rawBaseline'] = progress.rawBaseline;
       route['stepsBefore'] = progress.stepsBefore;
       route['steps'] = routeSteps;
       route['lastRaw'] = progress.lastRaw;
-      await prefsService.setActiveRoute(
-        routeId: route['id'] as int,
-        routeName: route['name'] as String,
-        startTime: route['startTime'] as DateTime,
-        rawBaseline: progress.rawBaseline,
-        stepsBefore: progress.stepsBefore,
-        steps: routeSteps,
-        lastRaw: progress.lastRaw,
-      );
-      await NotificationService.updateRouteNotification(
-        routeName: route['name'] as String,
-        steps: routeSteps,
-        elapsed: now.difference(route['startTime'] as DateTime),
-      );
+      if (routeStateChanged) {
+        await prefsService.setActiveRoute(
+          routeId: route['id'] as int,
+          routeName: route['name'] as String,
+          startTime: route['startTime'] as DateTime,
+          rawBaseline: progress.rawBaseline,
+          stepsBefore: progress.stepsBefore,
+          steps: routeSteps,
+          lastRaw: progress.lastRaw,
+        );
+      }
+      final routeName = route['name'] as String;
+      final elapsed = now.difference(route['startTime'] as DateTime);
+      notifications.run(() => NotificationService.updateRouteNotification(
+            routeName: routeName,
+            steps: routeSteps,
+            elapsed: elapsed,
+          ));
       channel.routeUpdate.send(service, routeSteps);
     } else {
-      await NotificationService.updateStepNotification(
-        steps: displaySteps,
-        target: dailyTarget,
-      );
+      notifications.run(() => NotificationService.updateStepNotification(
+            steps: displaySteps,
+            target: dailyTarget,
+          ));
     }
 
     // The date rides along so the app can tell a live figure from a stored
@@ -216,7 +237,9 @@ void onServiceStart(ServiceInstance service) async {
       service,
       channel.StepUpdate(steps: displaySteps, date: reading.date),
     );
-    channel.rawStep.send(service, event.steps);
+    // Only the calibration test and the route baseline consume this, and
+    // both care about the value rather than the event. Repeats carry nothing.
+    if (rawChanged) channel.rawStep.send(service, event.steps);
   }, onError: (Object error) async {
     // Need this handler here for devices with no step sensor.
     await recordSensorStatus(false);

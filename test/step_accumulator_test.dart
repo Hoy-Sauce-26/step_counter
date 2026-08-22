@@ -13,6 +13,10 @@ class FakeStepStore implements StepStore {
   final Map<String, int> hourly = {};
   LastRawReading? lastReading;
 
+  /// Counted because skipping redundant writes is the point of one of the
+  /// tests below — on Android each one is a blocking whole-file commit.
+  int lastReadingWrites = 0;
+
   String _hourKey(String date, int hour) => '$date@$hour';
 
   @override
@@ -51,8 +55,10 @@ class FakeStepStore implements StepStore {
   Future<LastRawReading?> readLastReading() async => lastReading;
 
   @override
-  Future<void> writeLastReading(LastRawReading reading) async =>
-      lastReading = reading;
+  Future<void> writeLastReading(LastRawReading reading) async {
+    lastReadingWrites++;
+    lastReading = reading;
+  }
 
 
 }
@@ -423,6 +429,68 @@ void main() {
         100,
         reason: "only the credit — yesterday's 500 must not carry over",
       );
+    });
+  });
+
+  group('redundant readings', () {
+    test('a reading that repeats the last one writes no last-reading',
+        () async {
+      await accumulator.record(1000, day1);
+      expect(store.lastReadingWrites, 1);
+
+      await accumulator.record(1000, day1.add(const Duration(seconds: 1)));
+      await accumulator.record(1000, day1.add(const Duration(seconds: 2)));
+
+      expect(
+        store.lastReadingWrites,
+        1,
+        reason: 'the stored value is already 1000; rewriting it costs a '
+            'blocking SharedPreferences commit and changes nothing',
+      );
+    });
+
+    test('a reading that moves still writes', () async {
+      await accumulator.record(1000, day1);
+      await accumulator.record(1000, day1);
+      await accumulator.record(1001, day1);
+
+      expect(store.lastReadingWrites, 2);
+      expect(store.lastReading?.raw, 1001);
+    });
+
+    test('repeats do not disturb the totals', () async {
+      await accumulator.record(1000, day1);
+      await accumulator.record(1200, day1);
+      final repeated = await accumulator.record(1200, day1);
+
+      expect(repeated.displaySteps, 200);
+      expect(store.daily['2026-08-16'], 200);
+    });
+
+    test('a repeat across a day boundary still rolls the day over', () async {
+      await accumulator.record(1000, day1);
+      await accumulator.record(1200, day1);
+
+      // Same raw value, next day: the skipped write leaves a stale timestamp,
+      // but a carried-over reading equal to the current one anchors the new
+      // day exactly where the current reading would have.
+      final next = await accumulator.record(1200, day2);
+
+      expect(next.displaySteps, 0);
+      expect(store.daily['2026-08-17'], 0);
+    });
+
+    test('a reboot is still detected after a run of repeats', () async {
+      await accumulator.record(1000, day1);
+      await accumulator.record(1000, day1);
+      await accumulator.record(1000, day1);
+
+      // Counter restarts; the day's 0 steps so far must survive and counting
+      // must resume from the new zero.
+      final afterReboot = await accumulator.record(5, day1);
+      expect(afterReboot.displaySteps, 0);
+
+      expect((await accumulator.record(105, day1)).displaySteps, 100);
     });
   });
 }

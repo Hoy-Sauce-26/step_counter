@@ -30,6 +30,8 @@ class PedometerService {
   final _prefsService = PreferencesService();
 
   bool _starting = false;
+  bool _started = false;
+  bool _foregroundSensing = true;
   int? _lastKnownRawSteps;
   bool? _sensorAvailable;
   int? _activeRouteSteps;
@@ -164,18 +166,57 @@ class PedometerService {
         setSensorAvailable(knownAvailable);
       }
 
-      _statusSubscription = Pedometer.pedestrianStatusStream.listen(
-        (status) {
-          debugPrint('[PedometerService] pedestrian status: ${status.status} '
-              'at ${DateTime.now()}');
-          _statusController.add(status.status);
-        },
-        onError: (Object error) => _statusController.add('unknown'),
-        cancelOnError: false,
-      );
+      _started = true;
+      _applyForegroundSensing();
     } finally {
       _starting = false;
     }
+  }
+
+  /// Whether the app is on screen. Drives the step-*detector* subscription in
+  /// [_applyForegroundSensing] — see that method for why that matters.
+  void setForegroundSensing(bool enabled) {
+    if (_foregroundSensing == enabled) return;
+    _foregroundSensing = enabled;
+    _applyForegroundSensing();
+  }
+
+  /// Subscribes to the step detector while the app is on screen, and drops
+  /// the subscription when it isn't.
+  ///
+  /// Nothing consumes [walkingStatusStream]. The subscription is kept anyway
+  /// because removing it outright made step *counts* arrive in laggy batches
+  /// instead of one at a time: `TYPE_STEP_DETECTOR` is registered at
+  /// `SENSOR_DELAY_FASTEST` with no batch latency, which holds the sensor
+  /// pipeline open and makes `TYPE_STEP_COUNTER` deliver each reading as it
+  /// happens. The real-time counter is a side effect of this listener.
+  ///
+  /// That side effect is only worth its power draw while somebody is looking
+  /// at it. A backgrounded Flutter app keeps its engine — and therefore this
+  /// subscription — alive until Android reclaims it, which can be hours of
+  /// waking the CPU per step for a screen nobody is on. Gating on foreground
+  /// keeps the live feel exactly where it is visible and stops paying for it
+  /// everywhere else; the background service keeps counting either way.
+  void _applyForegroundSensing() {
+    if (!_started) return;
+
+    if (!_foregroundSensing) {
+      _statusSubscription?.cancel();
+      _statusSubscription = null;
+      return;
+    }
+    if (_statusSubscription != null) {
+      return;
+    }
+    _statusSubscription = Pedometer.pedestrianStatusStream.listen(
+      (status) {
+        debugPrint('[PedometerService] pedestrian status: ${status.status} '
+            'at ${DateTime.now()}');
+        _statusController.add(status.status);
+      },
+      onError: (Object error) => _statusController.add('unknown'),
+      cancelOnError: false,
+    );
   }
 
   /// Re-seeds the displayed count from storage on resume, so a date rollover
@@ -215,6 +256,7 @@ class PedometerService {
     _bgSensorStatusSubscription = null;
     _statusSubscription?.cancel();
     _statusSubscription = null;
+    _started = false;
   }
 
   void dispose() {

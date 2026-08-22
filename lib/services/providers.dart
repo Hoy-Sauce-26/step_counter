@@ -40,7 +40,11 @@ final stepSensorAvailableProvider = StreamProvider<bool>((ref) {
 
 /// 'walking' / 'stopped' / 'unknown' — no UI consumer right now, but keep
 /// it running: removing it made steps arrive in laggy batches instead of
-/// individually (reason unclear, possibly Android sensor batching).
+/// individually. The reason is the step detector's `SENSOR_DELAY_FASTEST`
+/// registration holding the sensor pipeline open, which is what makes the
+/// step *counter* deliver per step; see
+/// `PedometerService._applyForegroundSensing`, which now scopes that to
+/// the foreground rather than leaving it on for the life of the engine.
 final walkingStatusProvider = StreamProvider<String>((ref) {
   final service = ref.watch(pedometerServiceProvider);
   service.start();
