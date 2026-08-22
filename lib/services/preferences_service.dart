@@ -20,6 +20,13 @@ class PreferencesService {
   static const double minStepsPerMinute = 60;
   static const double maxStepsPerMinute = 150;
 
+  /// Drops this isolate's cached snapshot of the preference file, so a
+  /// value the other isolate just wrote becomes visible here.
+  Future<void> reload() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.reload();
+  }
+
   Future<int> getDailyTarget() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getInt(_dailyTargetKey) ?? defaultDailyTarget;
@@ -109,6 +116,21 @@ class PreferencesService {
     }
   }
 
+  // Written by the background isolate on a timer, not per-reading — a
+  // reading's own timestamp can't distinguish "asleep for 8h" from "dead".
+  static const _serviceHeartbeatKey = 'serviceHeartbeat';
+
+  Future<DateTime?> getServiceHeartbeat() async {
+    final prefs = await SharedPreferences.getInstance();
+    final millis = prefs.getInt(_serviceHeartbeatKey);
+    return millis == null ? null : DateTime.fromMillisecondsSinceEpoch(millis);
+  }
+
+  Future<void> setServiceHeartbeat(DateTime at) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_serviceHeartbeatKey, at.millisecondsSinceEpoch);
+  }
+
   // Written by the background isolate — the only place allowed to touch the
   // sensor — and read by the app at launch.
   static const _stepSensorAvailableKey = 'stepSensorAvailable';
@@ -121,6 +143,20 @@ class PreferencesService {
   Future<void> setStepSensorAvailable(bool available) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_stepSensorAvailableKey, available);
+  }
+
+  // Set once the reader waves away the battery-exemption prompt, so it
+  // doesn't nag; the Settings screen still offers it.
+  static const _batteryPromptDismissedKey = 'batteryPromptDismissed';
+
+  Future<bool> getBatteryPromptDismissed() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_batteryPromptDismissedKey) ?? false;
+  }
+
+  Future<void> setBatteryPromptDismissed(bool dismissed) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_batteryPromptDismissedKey, dismissed);
   }
 
   // Nullable/unset by default — StepMetrics falls back to flat-rate
@@ -229,9 +265,19 @@ class PreferencesService {
     return prefs.getInt('manualSteps_$date') ?? 0;
   }
 
+  /// Only the current day's credit is ever read, so writing one drops every
+  /// other day's — same reasoning as [setStepBaseline].
   Future<void> setManualSteps(String date, int steps) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt('manualSteps_$date', steps);
+    final key = 'manualSteps_$date';
+    await prefs.setInt(key, steps);
+    final stale = prefs
+        .getKeys()
+        .where((k) => k.startsWith('manualSteps_') && k != key)
+        .toList();
+    for (final k in stale) {
+      await prefs.remove(k);
+    }
   }
 }
 

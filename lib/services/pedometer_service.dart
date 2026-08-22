@@ -30,6 +30,8 @@ class PedometerService {
   final _prefsService = PreferencesService();
 
   bool _starting = false;
+  bool _started = false;
+  bool _foregroundSensing = true;
   int? _lastKnownRawSteps;
   bool? _sensorAvailable;
   int? _activeRouteSteps;
@@ -133,6 +135,10 @@ class PedometerService {
 
       final service = FlutterBackgroundService();
 
+      // TEMP DIAGNOSTIC — see BackgroundService.onServiceStart.
+      if (kDebugMode) {
+        debugPrint('[PedometerService] SUBSCRIBING to stepUpdate');
+      }
       _bgStepSubscription = channel.stepUpdate.listen(service, (update) {
         _liveStepsDate = update.date;
         debugPrint('[PedometerService] stepUpdate from background service: '
@@ -151,6 +157,10 @@ class PedometerService {
       _bgSensorStatusSubscription =
           channel.sensorStatus.listen(service, setSensorAvailable);
 
+      // Both reads below are of keys the service isolate owns — reload or
+      // this answers from a stale start-up snapshot.
+      await _prefsService.reload();
+
       // A route in progress across an app restart has no live broadcast to
       // catch up on — the service only emits on a reading.
       final savedRoute = await _prefsService.getActiveRoute();
@@ -164,18 +174,47 @@ class PedometerService {
         setSensorAvailable(knownAvailable);
       }
 
-      _statusSubscription = Pedometer.pedestrianStatusStream.listen(
-        (status) {
-          debugPrint('[PedometerService] pedestrian status: ${status.status} '
-              'at ${DateTime.now()}');
-          _statusController.add(status.status);
-        },
-        onError: (Object error) => _statusController.add('unknown'),
-        cancelOnError: false,
-      );
+      _started = true;
+      _applyForegroundSensing();
     } finally {
       _starting = false;
     }
+  }
+
+  /// Whether the app is on screen — drives [_applyForegroundSensing].
+  void setForegroundSensing(bool enabled) {
+    if (_foregroundSensing == enabled) return;
+    _foregroundSensing = enabled;
+    _applyForegroundSensing();
+  }
+
+  /// Subscribes to the step detector while on screen, drops it otherwise.
+  ///
+  /// Nothing consumes [walkingStatusStream] directly — this subscription is
+  /// kept because `TYPE_STEP_DETECTOR` at `SENSOR_DELAY_FASTEST` holds the
+  /// sensor pipeline open, which is what makes `TYPE_STEP_COUNTER` deliver
+  /// per-step instead of in laggy batches. Worth the power draw only while
+  /// the screen is on; the background service counts regardless.
+  void _applyForegroundSensing() {
+    if (!_started) return;
+
+    if (!_foregroundSensing) {
+      _statusSubscription?.cancel();
+      _statusSubscription = null;
+      return;
+    }
+    if (_statusSubscription != null) {
+      return;
+    }
+    _statusSubscription = Pedometer.pedestrianStatusStream.listen(
+      (status) {
+        debugPrint('[PedometerService] pedestrian status: ${status.status} '
+            'at ${DateTime.now()}');
+        _statusController.add(status.status);
+      },
+      onError: (Object error) => _statusController.add('unknown'),
+      cancelOnError: false,
+    );
   }
 
   /// Re-seeds the displayed count from storage on resume, so a date rollover
@@ -215,6 +254,7 @@ class PedometerService {
     _bgSensorStatusSubscription = null;
     _statusSubscription?.cancel();
     _statusSubscription = null;
+    _started = false;
   }
 
   void dispose() {

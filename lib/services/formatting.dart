@@ -19,3 +19,9 @@ String formatDuration(Duration d) {
       ? '${hours}h ${paddedMinutes}m ${paddedSeconds}s'
       : '${minutes}m ${paddedSeconds}s';
 }
+
+/// Elapsed time at the coarsest resolution that still says something.
+String formatApproximateDuration(Duration d) {
+  if (d.inMinutes < 90) return 'about ${d.inMinutes}m';
+  return 'about ${(d.inMinutes / 60).round()}h';
+}

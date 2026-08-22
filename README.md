@@ -184,6 +184,33 @@ the buffer first, so a stored baseline can't outrun the total it anchors), and
 makes the restart invisible). `flush()` is called on `stopService`, because a
 timer that never fires is the one way buffered steps go missing for good.
 
+The last raw reading is skipped, though, when the reading repeats the previous
+one. Some OEM sensor stacks re-report the same cumulative count instead of
+reporting only changes, and on Android `SharedPreferences.setString` goes
+through `LegacySharedPreferencesPlugin`, which uses `commit()` — a blocking,
+fsync'd rewrite of the whole XML file. Skipping is safe rather than merely
+cheap: only the stored timestamp goes stale, and a carried-over reading equal
+to the current one contributes a zero delta whether it is carried or dropped,
+so no total downstream can tell the difference. The active route's row is
+skipped on the same terms, comparing every field it would persist.
+
+### Notification throttling
+
+`NotificationThrottle` collapses notification rewrites into one per second.
+Every rewrite is a platform-channel hop, an IPC to `NotificationManagerService`
+and a SystemUI relayout, and it was happening once per step; nobody can read a
+number that changes faster than that anyway.
+
+The first update in a quiet period goes out immediately, which is what keeps
+the notification feeling live. The trailing send is the load-bearing part: the
+most recent update to arrive during a window is sent when the window ends, so
+the last reading of a walk always lands and the notification can never settle
+showing a stale total. `flush()` is called on `stopService` for the same
+reason `ThrottledStepStore.flush()` is.
+
+Route and daily updates share the throttle deliberately — they target the same
+notification id, so last writer wins either way.
+
 ### Estimates
 
 `StepMetrics` turns a step count into distance, calories and active time.
@@ -387,9 +414,33 @@ repo.
   while the CPU sleeps. They are counted in full — the reading that delivers a
   batch carries all of it — but the display and notification lag until it
   lands. A batch spanning midnight counts entirely toward the day it is
-  delivered on: it carries no timestamps to split it by, so a late-night walk
-  the device slept through can land on the following morning, and a batch more
-  than 18h stale is dropped rather than misattributed.
+  delivered on, and a batch more than 18h stale is dropped rather than
+  misattributed, so a late-night walk the device slept through can land on the
+  following morning.
+
+  This is a limitation of the plugin, not of the platform. Each batched
+  `SensorEvent` carries its own `timestamp`, but `pedometer`'s
+  `SensorEventListenerFactory` forwards `event.values[0]` and nothing else,
+  and `StepCount._()` then stamps the reading with `DateTime.now()` on
+  arrival. Recovering the real event times would let a batch be split across
+  the hours and days it actually spans.
+
+- **A day the service never ran counts zero, permanently.** Totals are derived
+  per reading, and nothing journals `(raw, timestamp)` pairs over time, so a
+  service killed on Tuesday and restarted on Friday has no way to attribute
+  the intervening delta — `maxCarryOverGap` discards it rather than guessing.
+  The steps themselves are not lost by the hardware: `TYPE_STEP_COUNTER` keeps
+  counting whether or not anyone is listening, so the information needed to
+  reconstruct those days is still in the counter until the next reboot.
+
+- **The live per-step counter is a side effect of an unused listener.**
+  Nothing consumes `walkingStatusStream`, but its `TYPE_STEP_DETECTOR`
+  subscription — registered by the plugin at `SENSOR_DELAY_FASTEST` with no
+  batch latency — is what holds the sensor pipeline open and makes
+  `TYPE_STEP_COUNTER` deliver per step instead of in batches. Removing it
+  makes the counter laggy. `PedometerService.setForegroundSensing` scopes it
+  to the foreground so the app stops paying for it while backgrounded, but the
+  mechanism is still incidental rather than chosen.
 - **An unclean reboot can lose up to ten seconds of steps.** Database writes
   are buffered and flushed on a timer; an ordinary kill costs nothing, since
   the next reading recomputes the total from the baseline, but a reboot

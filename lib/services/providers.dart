@@ -8,6 +8,7 @@ import 'database_helper.dart';
 import 'formatting.dart';
 import 'metrics.dart';
 import 'pedometer_service.dart';
+import 'system_settings.dart';
 import 'preferences_service.dart';
 import 'service_channel.dart' as channel;
 
@@ -25,6 +26,10 @@ final databaseHelperProvider = Provider<DatabaseHelper>((ref) {
   return DatabaseHelper.instance;
 });
 
+final systemSettingsProvider = Provider<SystemSettings>((ref) {
+  return const SystemSettings();
+});
+
 /// Live "steps taken today" stream, sourced from the pedometer service.
 final todayStepsProvider = StreamProvider<int>((ref) {
   final service = ref.watch(pedometerServiceProvider);
@@ -38,9 +43,9 @@ final stepSensorAvailableProvider = StreamProvider<bool>((ref) {
   return service.sensorAvailableStream;
 });
 
-/// 'walking' / 'stopped' / 'unknown' — no UI consumer right now, but keep
-/// it running: removing it made steps arrive in laggy batches instead of
-/// individually (reason unclear, possibly Android sensor batching).
+/// No UI consumer — kept subscribed because it holds the sensor pipeline
+/// open, which is what makes the step counter deliver per-step instead of in
+/// laggy batches. See `PedometerService._applyForegroundSensing`.
 final walkingStatusProvider = StreamProvider<String>((ref) {
   final service = ref.watch(pedometerServiceProvider);
   service.start();

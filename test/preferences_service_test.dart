@@ -52,4 +52,75 @@ void main() {
 
     expect(await prefs.getLastRawReading(), isNull);
   });
+
+  group('manual steps', () {
+    test('a credit is stored against its date', () async {
+      SharedPreferences.setMockInitialValues({});
+
+      await prefs.setManualSteps('2026-08-22', 250);
+
+      expect(await prefs.getManualSteps('2026-08-22'), 250);
+    });
+
+    test('an unrecorded date reads as none', () async {
+      SharedPreferences.setMockInitialValues({});
+
+      expect(await prefs.getManualSteps('2026-08-22'), 0);
+    });
+
+    test('writing one drops every other day\'s', () async {
+      SharedPreferences.setMockInitialValues({
+        'flutter.manualSteps_2026-08-20': 100,
+        'flutter.manualSteps_2026-08-21': 200,
+      });
+
+      await prefs.setManualSteps('2026-08-22', 300);
+
+      expect(await prefs.getManualSteps('2026-08-22'), 300);
+      expect(await prefs.getManualSteps('2026-08-21'), 0,
+          reason: 'only the current day is ever read, and every key left '
+              'behind is re-serialized on every commit');
+      expect(await prefs.getManualSteps('2026-08-20'), 0);
+    });
+
+    test('pruning leaves unrelated keys alone', () async {
+      SharedPreferences.setMockInitialValues({
+        'flutter.manualSteps_2026-08-21': 200,
+        'flutter.baseline_2026-08-22': 900000,
+        'flutter.dailyTarget': 12000,
+      });
+
+      await prefs.setManualSteps('2026-08-22', 300);
+
+      expect(await prefs.getStepBaseline('2026-08-22'), 900000);
+      expect(await prefs.getDailyTarget(), 12000);
+    });
+  });
+
+  group('service heartbeat', () {
+    test('nothing written reads as nothing', () async {
+      SharedPreferences.setMockInitialValues({});
+
+      expect(await prefs.getServiceHeartbeat(), isNull,
+          reason: 'a fresh install must not look like a stalled service');
+    });
+
+    test('a beat comes back at the moment it was written', () async {
+      SharedPreferences.setMockInitialValues({});
+
+      await prefs.setServiceHeartbeat(morning);
+
+      expect(await prefs.getServiceHeartbeat(), morning);
+    });
+
+    test('a later beat supersedes an earlier one', () async {
+      SharedPreferences.setMockInitialValues({});
+      final later = morning.add(const Duration(minutes: 15));
+
+      await prefs.setServiceHeartbeat(morning);
+      await prefs.setServiceHeartbeat(later);
+
+      expect(await prefs.getServiceHeartbeat(), later);
+    });
+  });
 }
