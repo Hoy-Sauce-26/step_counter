@@ -16,6 +16,11 @@
             android:stopWithTask="false" />
 
         <receiver
+            android:name=".StepSampleReceiver"
+            android:enabled="true"
+            android:exported="false" />
+
+        <receiver
             android:name=".BootReceiver"
             android:enabled="true"
             android:exported="false">

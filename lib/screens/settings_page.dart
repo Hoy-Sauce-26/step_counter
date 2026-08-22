@@ -116,6 +116,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
     final unitSystem = ref.watch(unitSystemProvider);
     final factor = ref.watch(calibrationFactorProvider);
     final stepsPerMinute = ref.watch(stepsPerMinuteProvider);
+    final foregroundTracking = ref.watch(foregroundTrackingProvider);
 
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
@@ -188,25 +189,38 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
           ],
 
           const _SectionHeader('Notification'),
-          // No switch: the notification keeps the service alive, so a toggle
-          // would either lie or quietly stop tracking. Copy leads with "no
-          // off switch" before explaining why, and keeps "exists" separate
-          // from "how loud" — an earlier draft blurred them into what read
-          // as a contradiction.
-          ListTile(
-            leading: const Icon(Icons.notifications_none),
-            title: const Text('Ongoing notification'),
-            subtitle: const Text(
-              "Roamfree can't switch this off — it's what lets the app keep "
-              "counting while it's closed. You can still make it silent and "
-              'shrink it to a single line.',
+          // A real switch at last. It stops the foreground service, and the
+          // count survives because the hardware counter never stopped and one
+          // reading on resume closes the gap. Before the journal existed this
+          // toggle could only have lied or quietly stopped tracking, which is
+          // why it wasn't offered.
+          SwitchListTile(
+            secondary: const Icon(Icons.notifications_none),
+            title: const Text('Show ongoing notification'),
+            subtitle: Text(
+              foregroundTracking
+                  ? 'Your step count updates live while you walk.'
+                  : "Steps are still counted — they'll catch up when you open "
+                      'Roamfree.',
             ),
-            isThreeLine: true,
-            // Whole row, not a button — cramped otherwise. Icon is Android's
-            // usual "this leaves the app" signal.
-            trailing: const Icon(Icons.open_in_new, size: 20),
-            onTap: _openNotificationSettings,
+            value: foregroundTracking,
+            onChanged: (enabled) =>
+                ref.read(foregroundTrackingProvider.notifier).update(enabled),
           ),
+          // Still worth offering when the notification is on: it can be made
+          // silent and collapsed without being turned off entirely.
+          if (foregroundTracking)
+            ListTile(
+              leading: const Icon(Icons.tune),
+              title: const Text('Make it quieter'),
+              subtitle: const Text(
+                'Silence the notification and shrink it to a single line, '
+                'without turning off live updates.',
+              ),
+              isThreeLine: true,
+              trailing: const Icon(Icons.open_in_new, size: 20),
+              onTap: _openNotificationSettings,
+            ),
           const SizedBox(height: 24),
         ],
       ),

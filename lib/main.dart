@@ -2,12 +2,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:step_counter/services/database_helper.dart';
 import 'package:step_counter/services/notification_service.dart';
+import 'package:step_counter/services/preferences_service.dart';
 
 import 'screens/home_page.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await DatabaseHelper.instance.database;
+
+  // Cheap, idempotent, and only ever finds anything on the first launch
+  // after upgrading past the journal.
+  await PreferencesService().removeSupersededKeys();
 
   await NotificationService.init();
   await NotificationService.requestPermissions();

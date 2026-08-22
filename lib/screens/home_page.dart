@@ -54,18 +54,35 @@ class _HomePageState extends ConsumerState<HomePage>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      // Re-sync on resume, so a date rollover while the app was closed
-      // doesn't leave yesterday's total on screen until the next step.
-      ref.read(pedometerServiceProvider).refreshForCurrentDate();
-
       // Without this the denied screen stays up until the app is restarted.
       _refreshPermissionStatus();
 
-      // Restart the background service if something killed it (OEM
-      // battery manager, etc.) instead of tracking staying off silently.
-      _ensureBackgroundServiceRunning();
+      // Restart the background service if something killed it (OEM battery
+      // manager, etc.) instead of tracking staying off silently — or, with
+      // the notification off, start counting in this isolate.
+      //
+      // Before refreshForCurrentDate, not after: this is what brings the
+      // stored total up to date, and reading it first showed whatever the
+      // *previous* resume had left behind.
+      _ensureBackgroundServiceRunning().then((_) {
+        if (!mounted) return;
+        // A date rollover while the app was away would otherwise leave
+        // yesterday's total on screen until the next step.
+        ref.read(pedometerServiceProvider).refreshForCurrentDate();
+      });
 
       _refreshBatteryPrompt();
+    }
+
+    // Counting in this isolate is only worth its power draw while somebody is
+    // looking at the number. The sampler covers the app being away.
+    //
+    // Never on inactive: that fires for a pulled-down notification shade and
+    // for the app switcher, and tearing the subscription down and back up for
+    // those costs more than it saves.
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      ref.read(pedometerServiceProvider).stopLocalCounting();
     }
   }
 
@@ -74,6 +91,22 @@ class _HomePageState extends ConsumerState<HomePage>
     _ensuringBackgroundService = true;
     try {
       final bgService = TrackingService();
+      final pedometer = ref.read(pedometerServiceProvider);
+
+      // Turned off: no service, so this isolate counts for itself while the
+      // app is on screen. Subscribing catches the display up on the first
+      // reading and keeps it live from there.
+      if (!await ref.read(preferencesServiceProvider)
+          .getForegroundTrackingEnabled()) {
+        if (await bgService.isRunning()) await bgService.stop();
+        await pedometer.startLocalCounting();
+        return;
+      }
+
+      // Exactly one of the two counts at a time — both would journal the
+      // same readings and fight over the same rows.
+      await pedometer.stopLocalCounting();
+
       if (!await bgService.isRunning()) {
         await bgService.start(onServiceStart);
       } else {

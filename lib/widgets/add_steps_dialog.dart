@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 /// null if cancelled.
 ///
 /// The credit lands on the day and on no hour (see
-/// `StepAccumulator.creditManualSteps`), so the hourly chart is never made to
+/// `StepProjection.creditManualSteps`), so the hourly chart is never made to
 /// claim someone walked at a time they didn't. The dialog says so, because a
 /// total that moves while the hourly breakdown doesn't otherwise reads as a
 /// bug.

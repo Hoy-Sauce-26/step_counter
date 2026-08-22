@@ -61,7 +61,7 @@ void main() {
     expect(find.text('Daily target'), findsOneWidget);
     expect(find.text('Height, weight & units'), findsOneWidget);
     expect(find.text('Calibration'), findsOneWidget);
-    expect(find.text('Ongoing notification'), findsOneWidget);
+    expect(find.text('Show ongoing notification'), findsOneWidget);
   });
 
   testWidgets('an unanswerable platform hides the battery section entirely',
@@ -92,32 +92,36 @@ void main() {
     expect(find.widgetWithText(FilledButton, 'Allow'), findsNothing);
   });
 
-  testWidgets('the notification row offers no switch, only a way to quiet it',
+  testWidgets('the notification can be switched off outright', (tester) async {
+    await pumpSettings(tester, exempt: true);
+
+    // Only truthful since the journal: turning the service off no longer
+    // turns counting off with it.
+    expect(find.byType(SwitchListTile), findsOneWidget);
+    expect(find.text('Show ongoing notification'), findsOneWidget);
+  });
+
+  testWidgets('with the notification on, it can still be quietened',
       (tester) async {
     final system = await pumpSettings(tester, exempt: true);
 
-    expect(
-      find.byType(Switch),
-      findsNothing,
-      reason: 'the notification is what keeps the service alive, so a toggle '
-          'would either lie or quietly stop tracking',
-    );
-
-    await tester.tap(find.text('Ongoing notification'));
+    await tester.tap(find.text('Make it quieter'));
     await tester.pumpAndSettle();
 
     expect(system.notificationSettingsOpened, 1);
   });
 
-  testWidgets('the notification row says what it can and cannot change',
+  testWidgets('the subtitle promises the count survives being switched off',
       (tester) async {
     await pumpSettings(tester, exempt: true);
 
-    // The two halves have to stay together. Saying only that it can't be
-    // turned off reads as a dead end; saying only that it can be quietened
-    // invites somebody to go looking for an off switch that isn't there.
-    expect(find.textContaining("can't switch this off"), findsOneWidget);
-    expect(find.textContaining('silent'), findsOneWidget);
+    await tester.tap(find.byType(SwitchListTile));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('still counted'), findsOneWidget,
+        reason: 'the reason the switch is offerable at all');
+    expect(find.text('Make it quieter'), findsNothing,
+        reason: 'nothing to quieten once there is no notification');
   });
 
   testWidgets('unset personal details read as unset rather than as zeroes',

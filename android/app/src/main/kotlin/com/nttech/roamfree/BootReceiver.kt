@@ -11,6 +11,9 @@ import android.content.Intent
  * opened at least once. Android holds a freshly installed app in a stopped
  * state that blocks this broadcast entirely until then, so there is nothing
  * to do on a first install regardless.
+ *
+ * Also respects the user's notification setting, which is why that setting
+ * has to be readable from Kotlin: this fires long before any Dart does.
  */
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
@@ -19,6 +22,15 @@ class BootReceiver : BroadcastReceiver() {
             intent.action == "android.intent.action.QUICKBOOT_POWERON"
         if (!relevant) return
         if (TrackingCallback.read(context) == 0L) return
+
+        // Sampling comes back either way: it is what keeps a day the service
+        // never ran from reading zero, and a reboot is exactly when the
+        // counter zeroes and a reading on the far side matters most.
+        StepSampler.schedule(context)
+
+        // The service itself is the user's choice. Someone who turned the
+        // notification off does not want it back on every reboot and update.
+        if (!TrackingPreference.isForegroundTrackingEnabled(context)) return
 
         StepTrackingService.start(context)
     }

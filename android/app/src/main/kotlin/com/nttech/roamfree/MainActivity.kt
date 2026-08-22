@@ -20,6 +20,10 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
+        // Re-armed on every launch, so a sampler an OEM cleared, or one lost
+        // to a force-stop, comes back the next time the app is opened.
+        StepSampler.schedule(this)
+
         serviceChannel =
             MethodChannel(flutterEngine.dartExecutor.binaryMessenger, SERVICE_CHANNEL).also {
                 it.setMethodCallHandler(::onServiceCall)

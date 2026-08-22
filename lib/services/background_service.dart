@@ -9,10 +9,11 @@ import 'package:roameter/roameter.dart';
 import 'formatting.dart';
 import 'notification_service.dart';
 import 'notification_throttle.dart';
+import 'live_step_counter.dart';
 import 'preferences_service.dart';
 import 'service_channel.dart' as channel;
 import 'tracking_service.dart';
-import 'step_accumulator.dart';
+import 'step_projection.dart';
 
 /// Starts the tracking service, registering [onServiceStart] as what it runs.
 /// Idempotent — starting a running service is a no-op on the platform side.
@@ -41,31 +42,34 @@ void onServiceStart() async {
 
   final prefsService = PreferencesService();
 
-  // Buffered rather than written straight through:
-  final stepStore = ThrottledStepStore(PersistentStepStore());
-
-  // Same idea for the notification: rewriting it per step is wasted work.
+  // Rewriting the notification per step is wasted work.
   final notifications = NotificationThrottle();
+
+  final projection = StepProjection();
+  // Anything left in preferences from before credits became per-date rows.
+  await projection.migrateManualStepsFromPreferences();
+
+  // A snapshot, not a live read — recalibration arrives over the channel.
+  double correctionFactor = await prefsService.getCorrectionFactor();
+  int dailyTarget = await prefsService.getDailyTarget();
+
+  final counter = LiveStepCounter(
+    projection,
+    correctionFactor: () => correctionFactor,
+  );
+
+  int? lastKnownRawSteps;
+  var journalSeeded = false;
 
   // No foreground/background toggle: this service is only ever foreground.
   service.on('stopService').listen((event) async {
-    // Commit before going away: neither flush timer gets another chance.
-    await stepStore.flush();
+    // Commit before going away: neither the journal nor the notification
+    // gets another chance.
+    final raw = lastKnownRawSteps;
+    if (raw != null) await counter.flush(raw, DateTime.now());
     await notifications.flush();
     await service.stopSelf();
   });
-
-  // All day/hour/manual bookkeeping lives here. This isolate keeps no copy of
-  // it, so there is nothing to drift out of sync.
-  final accumulator = StepAccumulator(
-    stepStore,
-    correctionFactor: await prefsService.getCorrectionFactor(),
-  );
-
-  // A snapshot, not a live read: see StepAccumulator.correctionFactor.
-  int dailyTarget = await prefsService.getDailyTarget();
-
-  int? lastKnownRawSteps;
 
   Map<String, Object?>? activeRoute;
 
@@ -84,7 +88,7 @@ void onServiceStart() async {
 
   // The only way a recalibration reaches this isolate.
   channel.setCorrectionFactor.handle(service, (factor) {
-    accumulator.correctionFactor = factor;
+    correctionFactor = factor;
   });
 
   // Same deal for the target
@@ -116,7 +120,7 @@ void onServiceStart() async {
     activeRoute = null;
     await prefsService.clearActiveRoute();
     // Revert the notification without waiting for the next step event.
-    final steps = accumulator.lastDisplaySteps ?? 0;
+    final steps = counter.lastDisplaySteps ?? 0;
     notifications.run(() => NotificationService.updateStepNotification(
           steps: steps,
           target: dailyTarget,
@@ -125,8 +129,10 @@ void onServiceStart() async {
 
   channel.addManualSteps.handle(service, (amount) async {
     final creditedAt = DateTime.now();
-    final newTotal = await accumulator.creditManualSteps(amount, creditedAt);
-    if (newTotal == null) return;
+    final newTotal = await projection.creditManualSteps(amount, creditedAt);
+    // The credit changed the day's derived total without any reading having
+    // arrived, so the live counter has to pick it up.
+    await counter.refresh(creditedAt);
 
     // Push an update rather than waiting for the next real reading.
     if (activeRoute == null) {
@@ -180,7 +186,13 @@ void onServiceStart() async {
     lastKnownRawSteps = event.steps;
     await recordSensorStatus(true);
 
-    final reading = await accumulator.record(event.steps, now);
+    // Before the first record(), so the fold has the day's opening reading.
+    if (!journalSeeded) {
+      journalSeeded = true;
+      await projection.backfillFromStoredTotal(event.steps, now);
+    }
+
+    final reading = await counter.record(event.steps, now);
     final displaySteps = reading.displaySteps;
 
     // Steps always count toward the daily total above regardless of an
@@ -195,7 +207,7 @@ void onServiceStart() async {
         stepsBefore: route['stepsBefore'] as int? ?? 0,
         bankedSteps: route['steps'] as int?,
         lastRaw: route['lastRaw'] as int?,
-        correctionFactor: accumulator.correctionFactor,
+        correctionFactor: correctionFactor,
       );
       final routeSteps = progress.steps;
 

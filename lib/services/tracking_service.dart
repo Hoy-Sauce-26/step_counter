@@ -86,6 +86,11 @@ class TrackingService {
     });
   }
 
+  /// Stops the service, and with it the ongoing notification.
+  Future<void> stop() async {
+    invoke('stopService');
+  }
+
   /// Sends a command to the service isolate. Dropped if it isn't running.
   void invoke(String method, [Map<String, dynamic>? args]) {
     _channel.invokeMethod<bool>('sendToService', {
